@@ -4,14 +4,15 @@ from sqlalchemy import create_engine, text
 import os
 import sys
 import logging
-import typer
+from typer import Typer, Option
+from typing import List, Annotated
 from dotenv import load_dotenv
 
 from modules import api, stream
 from datetime import datetime, timedelta
 
 
-app = typer.Typer()
+app = Typer()
 
 class credentials:
    db_host = None
@@ -91,15 +92,14 @@ def process_transaction_files( import_dir: str = './data/import',
    return
 
 @app.command()
-def get_transactions(account_number: str, 
-                     days: int = 7, 
-                     start_date: str = None, 
-                     end_date: str = None) -> list:
+def get_transactions(account: Annotated[List[str], Option(..., "--account", help="One or more account numbers")],
+                     days: int = Option(7, help="Number of days back from current date to get transactions for"),
+                     start_date: str = Option(None, help="start date of date range to pull transactions for"),
+                     end_date: str = Option(None, help="end date of date range to pull transactions for")) -> list:
 
    """
-   Get transactions from the API
+   Get transactions using the API
    """
-
    if start_date is None:
       start_date = datetime.now() - timedelta(days=days)
    else:
@@ -110,11 +110,12 @@ def get_transactions(account_number: str,
    else:
       end_date = datetime.strptime(end_date, '%Y-%m-%d')
 
-   api.initialize(accountNumber=account_number)
+   for account_number in account:
+      api.initialize(accountNumber=account_number)
 
-   for transaction_type in ('TRADE', 'DIVIDEND_OR_INTEREST'):
-      activities = api.transactions.transactions(start_date, end_date, transaction_type).json()
-      load_activities(activities)
+      for transaction_type in ('TRADE', 'DIVIDEND_OR_INTEREST'):
+         activities = api.transactions.transactions(start_date, end_date, transaction_type).json()
+         load_activities(activities)
    return
 
 
@@ -337,9 +338,6 @@ def store_transactions(transactions: list, transaction_items: list) -> int:
 if __name__ == '__main__':
    
    load_dotenv()
-   credentials.aaron_ira_accountNumber = os.getenv('aaron_ira_accountNumber')
-   credentials.stacey_ira_accountNumber = os.getenv('stacey_ira_accountNumber')
-   credentials.family_accountNumber = os.getenv('family_accountNumber')
    credentials.db_host = os.getenv('db_host')
    credentials.db_user = os.getenv('db_user')
    credentials.db_password = os.getenv('db_password')
@@ -349,11 +347,23 @@ if __name__ == '__main__':
    engine = create_engine(f'mysql+mysqlconnector://{credentials.db_user}:{credentials.db_password}@{credentials.db_host}/{credentials.db_name}')
 
    # Create a logger
-   logger = logging.getLogger('theta_burn.log')
-
-   # Set the level of this logger. Only messages with level INFO or higher will be processed
+   logger = logging.getLogger()
    logger.setLevel(logging.INFO)
 
+   # Create a console handler and set level to info
+   handler = logging.StreamHandler(sys.stdout)
+   handler.setLevel(logging.INFO)
+
+   # Create a formatter
+   formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+   # Add formatter to handler
+   handler.setFormatter(formatter)
+
+   # Add handler to logger
+   logger.addHandler(handler)
+
+   # Connect to the database
    db = engine.connect()
 
    transactions = []
