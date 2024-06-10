@@ -1,6 +1,10 @@
 import json
 import pandas as pd
-from sqlalchemy import create_engine, text
+
+from orm.database import Database
+from orm.models import Transaction, Account, Order, OrderItem, Position
+from sqlalchemy import text, update, select, func
+
 import os
 import sys
 import logging
@@ -8,47 +12,46 @@ from typer import Typer, Option
 from typing import List, Annotated
 from dotenv import load_dotenv
 
-from modules import api, stream
+from broker.schwab import api, stream
 from datetime import datetime, timedelta
 
 
 app = Typer()
 
-class credentials:
-   db_host = None
-   db_user = None
-   db_password = None
-   db_name = None
-   aaron_ira_accountNumber = None
-   stacey_ira_accountNumber = None
-   family_accountNumber = None
-
-
-
 def get_transactions_from_db() -> list:
-
    """
-   Get transactions from the database
+   Get transaction IDs from the database using SQLAlchemy ORM.
    """
-   existing_transactions = []
 
-   query = text('SELECT transaction_id FROM transactions')
-   for row in db.execute(query):
-      existing_transactions.append(row.transaction_id) 
-   return existing_transactions
+   # Query the database directly using the Account model
+   transaction_query = session.query(Transaction.transaction_id).all()
+
+   # Convert the query result to a list
+   return [id[0] for id in transaction_query]
 
 def get_accounts_from_db() -> dict:
-      """
-      Get accounts from the database
-      """
+   """
+   Get accounts from the database
+   """
       
-      accounts = {}
+   # Query the database directly using the Account model
+   accounts_query = session.query(Account.account_number, Account.account_id).all()
 
-      query = text('SELECT account_id, account_number FROM accounts')
-      for row in db.execute(query):
-         accounts[row.account_number] = row.account_id
+   # Convert the query result to a dictionary
+   return  {account_number: account_id for account_number, account_id in accounts_query}
 
-      return accounts 
+def get_orders_from_db() -> dict:
+   """
+   Get order IDs and status from the database
+   """
+      
+   # Query the database directly using the Account model
+   orders_query = session.query(Order.order_id, Order.status).all()
+
+   # Convert the query result to a dictionary
+   return  {order_id: status for order_id, status in orders_query}
+
+
 
 def set_log_file(logger: logging.Logger, filename: str):
     # Create a file handler
@@ -95,7 +98,8 @@ def process_transaction_files( import_dir: str = './data/import',
 def get_transactions(account: Annotated[List[str], Option(..., "--account", help="One or more account numbers")],
                      days: int = Option(7, help="Number of days back from current date to get transactions for"),
                      start_date: str = Option(None, help="start date of date range to pull transactions for"),
-                     end_date: str = Option(None, help="end date of date range to pull transactions for")) -> list:
+                     end_date: str = Option(None, help="end date of date range to pull transactions for"),
+                     debug: bool = Option(None, help="print the transaction json")) -> list:
 
    """
    Get transactions using the API
@@ -115,8 +119,218 @@ def get_transactions(account: Annotated[List[str], Option(..., "--account", help
 
       for transaction_type in ('TRADE', 'DIVIDEND_OR_INTEREST'):
          activities = api.transactions.transactions(start_date, end_date, transaction_type).json()
+         if debug:
+            print(json.dumps(activities, indent=2))
          load_activities(activities)
    return
+
+@app.command()
+def get_positions(account: Annotated[List[str], Option(..., "--account", help="One or more account numbers")],
+                  debug: bool = Option(None, help="print the transaction json")) -> list:
+
+   for account_number in account:
+      api.initialize(accountNumber=account_number)
+      positions = api.accounts.getAccount(fields="positions").json()
+
+      if debug:
+         print(json.dumps(positions, indent=2))
+      
+      load_positions(positions)
+   return
+
+
+def load_positions(positions_json: str):
+   """
+   Transform and load positions
+   """
+   account_id = None
+   positions = []
+
+   accounts = get_accounts_from_db()
+   account_id = accounts.get(int(positions_json['securitiesAccount']['accountNumber']), None)
+   
+   date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+   for j in positions_json['securitiesAccount']['positions']:
+
+      position = {
+         'account_id': account_id,
+         'date': date,
+         'short_quantity': j['shortQuantity'],
+         'long_quantity': j['longQuantity'],
+         'average_price': j['averagePrice'],
+         'maintenance_requirement': j['maintenanceRequirement'],
+         'current_day_profit_loss': j['currentDayProfitLoss'],
+         'market_value': j['marketValue'],
+         'current_day_profit_loss_percentage': j['currentDayProfitLossPercentage'],
+         'cusip': j['instrument'].get('cusip'),
+         'asset_type': j['instrument'].get('putCall', j['instrument'].get('assetType')),
+         'symbol': j['instrument'].get('symbol'),
+         'underlying_symbol': j['instrument'].get('underlyingSymbol', j['instrument'].get('symbol')),            
+         'description': j['instrument'].get('description'),
+         'maturity_date': j['instrument'].get('maturityDate'),
+         'variable_rate': j['instrument'].get('variableRate'),
+         'net_change': j['instrument'].get('netChange',0),
+      }
+      if position['asset_type'] == 'COLLECTIVE_INVESTMENT': 
+         position['asset_type'] = 'EQUITY'
+      
+      positions.append(position)
+   
+   store_positions(positions)
+   reset_latest_positions()
+   return
+
+def store_positions(positions: list):
+   """
+   Store positions in the database
+   """
+   if len(positions) == 0:
+      logger.info('No positions to store in the database. Exiting.')
+      return
+
+   positions_df = pd.DataFrame(positions)
+   positions_df['date'] = pd.to_datetime(positions_df['date'])
+   positions_df['maturity_date'] = pd.to_datetime(positions_df['maturity_date'])
+
+   positions_df.to_sql('positions', engine, if_exists='append', index=False)
+
+   reset_latest_positions()
+
+   return
+
+def reset_latest_positions():
+    """
+    Reset the latest positions in the database using SQLAlchemy ORM
+    """
+    # First, reset all 'latest' flags to 'N'
+    session.query(Position).update({"latest": "N"}, synchronize_session=False)
+
+    # Then, identify the most recent position for each account and set 'latest' to 'Y'
+    subq = session.query(
+        Position.account_id,
+        func.max(Position.date).label('max_date')
+    ).group_by(Position.account_id).subquery('max_dates')
+
+    # Correlated update statement
+    update_stmt = update(Position).\
+        values(latest="Y").\
+        where(Position.date == subq.c.max_date).\
+        where(Position.account_id == subq.c.account_id)
+    session.execute(update_stmt)
+
+    session.commit()
+    return
+
+@app.command()
+def get_orders(account: Annotated[List[str], Option(..., "--account", help="One or more account numbers")],
+                     days: int = Option(7, help="Number of days back from current date to get transactions for"),
+                     start_date: str = Option(None, help="start date of date range to pull transactions for"),
+                     end_date: str = Option(None, help="end date of date range to pull transactions for"),
+                     status: str = Option(None, help="status of the order"),
+                     debug: bool = Option(None, help="print the transaction json")) -> list:
+
+   """
+   Get orders using the API
+   """
+   if start_date is None:
+      start_date = datetime.now() - timedelta(days=days)
+   else:
+      start_date = datetime.strptime(start_date, '%Y-%m-%d')
+
+   if end_date is None:
+      end_date = datetime.now()
+   else:
+      end_date = datetime.strptime(end_date, '%Y-%m-%d')
+
+
+   for account_number in account:
+      api.initialize(accountNumber=account_number)
+
+      accounts = get_accounts_from_db()
+      account_id = accounts.get(int(account_number), None)
+
+      orders = api.orders.getOrders(maxResults=5000, fromEnteredTime=start_date, toEnteredTime=end_date, status=status).json()
+      if debug:
+         print(json.dumps(orders, indent=2))
+
+      existing_orders = get_orders_from_db()
+
+      skipped_orders = 0
+      updated_orders = 0
+      new_orders = 0
+
+      for order_json in orders:
+         order_id = order_json.get('orderId')
+         status = order_json.get('status')
+
+         if existing_orders.get(order_id) is not None and existing_orders.get(order_id) == status:
+            # Order exists in db but has the same status than the one from the API
+            # Skip
+            skipped_orders += 1
+            continue
+         elif existing_orders.get(order_id) is not None and existing_orders.get(order_id) != status:
+            # Order exists in the db and status has changed
+            # Delete the order from the db and insert the the updated one from the API
+            # Rows in order_items table will be deleted by the cascade delete
+            session.query(Order).filter(Order.order_id == order_id).delete()
+            session.commit()
+            updated_orders += 1
+         else:
+            # Order does not exist in the db
+            new_orders += 1
+
+         order = Order(
+               account_id = account_id,
+               entered_time = datetime.strptime(order_json.get('enteredTime'),"%Y-%m-%dT%H:%M:%S%z"),
+               order_id = order_json.get('orderId'),
+               order_type = order_json.get('orderType'),
+               cancel_time = datetime.strptime(order_json.get('cancelTime'),"%Y-%m-%dT%H:%M:%S%z"),
+               quantity = order_json.get('quantity'),
+               filled_quantity = order_json.get('filledQuantity'),
+               remaining_quantity = order_json.get('remainingQuantity'),
+               requested_destination = order_json.get('requestedDestination'),
+               order_strategy_type = order_json.get('orderStrategyType'),
+               status = order_json.get('status'),
+               price = order_json.get('price'),
+               order_duration = order_json.get('orderDuration'),
+               order_class = order_json.get('orderClass')
+               )
+         session.add(order)
+         session.commit()
+
+         for order_item in order_json['orderLegCollection']:
+            strike_price = None
+            multiplier = 1
+            if order_item.get('orderLegType') == 'OPTION':
+               strike_price = order_item['instrument'].get('symbol')[-8:-2]
+               strike_price = int(strike_price) / 10  # Convert to a decimal number
+            if 'instrument' in order_item and 'optionDeliverables' in order_item['instrument']:
+               multiplier = order_item['instrument']['optionDeliverables'][0]['deliverableUnits']
+            else:
+               multiplier = 1
+
+            order_item = OrderItem(
+               account_id = account_id,
+               order_id = order_id,
+               order_leg_type = order_item.get('orderLegType'),
+               instruction = order_item.get('instruction'),
+               quantity = order_item.get('quantity'),
+               asset_type = order_item['instrument'].get('assetType'),
+               symbol = order_item['instrument'].get('symbol'),
+               description = order_item['instrument'].get('description'),
+               cusip = order_item['instrument'].get('cusip'),
+               put_call = order_item['instrument'].get('putCall'),
+               underlying_symbol = order_item['instrument'].get('underlyingSymbol'),
+               maturity_date = order_item['instrument'].get('maturityDate'),
+               strike_price = strike_price,
+               multiplier = multiplier,
+               order_item_id = order_item.get('legId')
+            )
+            session.add(order_item)
+            session.commit()
+      logger.info(f'Orders: {new_orders} new orders, {updated_orders} updated orders, {skipped_orders} skipped orders')
 
 
 def load_activities(activities: list):
@@ -168,19 +382,11 @@ def load_transaction(activity: dict, account_id: int):
          'type': activity['type'],
          'status': activity['status'],
          'amount': activity['netAmount'],
-      }
-
-   if 'orderId' in activity:
-      transaction['order_id'] = activity['orderId']
-
-   if 'description' in activity:
-      transaction['description'] = activity['description']
-
-   if 'positionId' in activity:
-      transaction['position_id'] = activity['positionId']
-
+         'order_id': activity.get('orderId'),
+         'description': activity.get('description'),
+         'position_id': activity.get('positionId')
+   }
    transactions.append(transaction)
-
    return transaction
 
 def load_dividend_or_interest(transaction: dict, activity: dict, transferItem: dict, assetType: str):
@@ -240,9 +446,7 @@ def load_option(transaction: dict, activity: dict, transferItem: dict, assetType
 
    item['transaction_id'] = activity['activityId']
    item['asset_type'] = transferItem['instrument']['putCall']
-
-   if 'symbol' in transferItem['instrument']:
-      item['symbol'] = transferItem['instrument']['symbol']
+   item['symbol'] = transferItem['instrument'].get('symbol')  
    item['description'] = transferItem['instrument']['description']
    item['expiration_date'] = transferItem['instrument']['expirationDate']
    item['strike_price'] = transferItem['instrument']['strikePrice']
@@ -250,8 +454,7 @@ def load_option(transaction: dict, activity: dict, transferItem: dict, assetType
    item['quantity'] = abs(transferItem['amount'])
    item['amount'] = transferItem['price']
    item['extended_amount'] = transferItem['cost']
-   if 'positionEffect' in transferItem:
-      item['position_effect'] = transferItem['positionEffect']
+   item['position_effect'] = transferItem.get('positionEffect')
    if transferItem['amount'] < 0:
       item['transaction'] = 'SELL'
    else:
@@ -273,7 +476,7 @@ def load_equity(transaction: dict, activity: dict, transferItem: dict, assetType
    item['quantity'] = abs(transferItem['amount'])
    item['amount'] = transferItem['price']
    item['extended_amount'] = transferItem['cost']
-   if transferItem['amount'] > 0:
+   if transferItem['cost'] > 0:
       item['transaction'] = 'SELL'
    else:
       item['transaction'] = 'BUY'
@@ -338,13 +541,15 @@ def store_transactions(transactions: list, transaction_items: list) -> int:
 if __name__ == '__main__':
    
    load_dotenv()
-   credentials.db_host = os.getenv('db_host')
-   credentials.db_user = os.getenv('db_user')
-   credentials.db_password = os.getenv('db_password')
-   credentials.db_name = os.getenv('db_name')
+   db_host = os.getenv('db_host')
+   db_user = os.getenv('db_user')
+   db_password = os.getenv('db_password')
+   db_name = os.getenv('db_name')
    
-   # connect to mariadb
-   engine = create_engine(f'mysql+mysqlconnector://{credentials.db_user}:{credentials.db_password}@{credentials.db_host}/{credentials.db_name}')
+   # connect to the database
+   db = Database(db_name, db_user, db_password, db_host)
+   engine = db.engine
+   session = db.Session
 
    # Create a logger
    logger = logging.getLogger()
@@ -362,12 +567,11 @@ if __name__ == '__main__':
 
    # Add handler to logger
    logger.addHandler(handler)
-
-   # Connect to the database
-   db = engine.connect()
-
+   
    transactions = []
    transaction_items = []
+   orders = []
+   order_items = []
    
    app()
    db.close()

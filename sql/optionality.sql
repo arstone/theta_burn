@@ -23,13 +23,22 @@ create table users (
 create table accounts (
     account_id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
-    account_number  bigint NOT NULL,
+    account_number  bigint,
     broker_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
     type VARCHAR(255) NOT NULL,
     balance DECIMAL(10,2) NOT NULL,
     FOREIGN KEY (broker_id) REFERENCES brokers(broker_id),
     FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE account_balances (
+    id INT AUTO_INCREMENT,
+    account_id INT,
+    balance DECIMAL(15, 2),
+    date DATE,
+    PRIMARY KEY (id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id)
 );
 
 create table strategies (
@@ -91,7 +100,7 @@ create table transaction_items (
     asset_type VARCHAR(255) NOT NULL,
     transaction VARCHAR(255),
     amount DECIMAL(10,2),
-    quantity INT,
+    quantity DECIMAL(10,2),
     symbol VARCHAR(255),
     description VARCHAR(255),
     strike_price DECIMAL(10,2),
@@ -102,7 +111,7 @@ create table transaction_items (
     FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id));
 
 create table quotes (
-    quote_id bigint PRIMARY KEY,
+    quote_id bigint AUTO_INCREMENT PRIMARY KEY,
     symbol VARCHAR(255) NOT NULL,
     date DATE NOT NULL,
     bid DECIMAL(10,2) NOT NULL,
@@ -135,6 +144,65 @@ create table calendar (
     is_current_month BOOLEAN AS (YEAR(date) = YEAR(CURDATE()) AND MONTH(date) = MONTH(CURDATE()))
 );
 
+
+create table positions (
+    position_id bigint AUTO_INCREMENT PRIMARY KEY,
+    account_id INT NOT NULL,
+    date datetime NOT NULL,
+    asset_type VARCHAR(255),
+    short_quantity DECIMAL(10, 2),
+    long_quantity DECIMAL(10, 2),
+    average_price DECIMAL(10, 2),
+    current_day_profit_loss DECIMAL(10, 2),
+    current_day_profit_loss_percentage DECIMAL(10, 2),
+    market_value DECIMAL(10, 2),
+    net_change DECIMAL(10, 2),
+    maintenance_requirement DECIMAL(10, 2),
+    cusip VARCHAR(255),
+    symbol VARCHAR(255),
+    underlying_symbol VARCHAR(255),
+    description TEXT,
+    maturity_date DATETIME,
+    variable_rate DECIMAL(10, 2),
+    latest CHAR(1) DEFAULT 'N'
+);
+
+CREATE TABLE orders (
+    account_id INT,
+    entered_time DATETIME,
+    order_id BIGINT,
+    order_type VARCHAR(255),
+    cancel_time DATETIME,
+    quantity DECIMAL(10, 2),
+    filled_quantity DECIMAL(10, 2),
+    remaining_quantity DECIMAL(10, 2),
+    requested_destination VARCHAR(255),
+    order_strategy_type VARCHAR(255),
+    status VARCHAR(255),
+    price DECIMAL(10, 2),
+    order_duration VARCHAR(255),
+    order_class VARCHAR(255),
+    PRIMARY KEY (account_id, order_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id)
+);
+
+CREATE TABLE order_items (
+    order_id BIGINT,
+    order_leg_type VARCHAR(255),
+    instruction VARCHAR(255),
+    quantity DECIMAL(10, 2),
+    asset_type VARCHAR(255),
+    symbol VARCHAR(255),
+    description VARCHAR(255),
+    cusip VARCHAR(255),
+    put_call VARCHAR(255),
+    underlying_symbol VARCHAR(255),
+    maturity_date DATE,
+    strike_price DECIMAL(10, 2),
+    multiplier INT,
+    order_item_id INT,
+    PRIMARY KEY (order_id, order_item_id)
+);
 
 create or replace view transaction_view as (
 select

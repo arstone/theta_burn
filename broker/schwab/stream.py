@@ -11,7 +11,7 @@ import websockets
 import websockets.exceptions
 from time import sleep
 from datetime import datetime, time
-from modules import terminal, api
+from broker.schwab import terminal, api
 
 
 class streamVars:
