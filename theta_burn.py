@@ -17,50 +17,6 @@ from datetime import datetime, timedelta
 
 app = Typer()
 
-def get_transactions_from_db() -> list:
-   """
-   Get transaction IDs from the database using SQLAlchemy ORM.
-   """
-
-   # Query the database directly using the Account model
-   transaction_query = session.query(Transaction.transaction_id).all()
-
-   # Convert the query result to a list
-   return [id[0] for id in transaction_query]
-
-def get_accounts_from_db() -> dict:
-   """
-   Get accounts from the database
-   """
-      
-   # Query the database directly using the Account model
-   accounts_query = session.query(Account.account_number, Account.account_id).all()
-
-   # Convert the query result to a dictionary
-   return  {account_number: account_id for account_number, account_id in accounts_query}
-
-def get_orders_from_db() -> dict:
-   """
-   Get order IDs and status from the database
-   """
-      
-   # Query the database directly using the Account model
-   orders_query = session.query(Order.order_id, Order.status).all()
-
-   # Convert the query result to a dictionary
-   return  {order_id: status for order_id, status in orders_query}
-
-def set_log_file(logger: logging.Logger, filename: str):
-    # Create a file handler
-    handler = logging.FileHandler(filename)
-
-    # Create a formatter and add it to the handler
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-
-    # Add the handler to the logger
-    logger.addHandler(handler)
-
 @app.command()
 def process_transaction_files( import_dir: str = './data/import',
                         log_dir: str = '.',
@@ -186,6 +142,137 @@ def get_orders(account: Annotated[List[str], Option(..., "--account", help="One 
 
       result = store_orders(account_id, orders)
       logger.info(f'Loaded {result["new_orders"]} new orders, updated {result["updated_orders"]} orders, skipped {result["skipped_orders"]} orders')
+
+def store_orders(account_id: int, orders: list) -> dict:
+   """
+   Transform and load orders.  
+   Orders can change status so we need to update db rows if api status != db status
+   """
+   existing_orders = get_orders_from_db()
+
+   skipped_orders = 0
+   updated_orders = 0
+   new_orders = 0
+   for order_json in orders:
+      order_id = order_json.get('orderId')
+      status = order_json.get('status')
+
+      if order_id in existing_orders and existing_orders[order_id] == status:
+         # Order exists in db but has the same status as the one from the API
+         # Skip
+         skipped_orders += 1
+         continue
+      elif order_id in existing_orders and existing_orders[order_id] != status:
+         # Order exists in the db and status has changed
+         # Delete the order from the db and insert the the updated one from the API
+         # Rows in order_items table will be deleted by the cascade delete
+         session.query(Order).filter(Order.order_id == order_id).delete()
+         session.commit()
+         updated_orders += 1
+      else:
+         # Order does not exist in the db
+         new_orders += 1
+
+      order = Order(
+            account_id = account_id,
+            entered_time = datetime.strptime(order_json.get('enteredTime'),"%Y-%m-%dT%H:%M:%S%z"),
+            order_id = order_json.get('orderId'),
+            order_type = order_json.get('orderType'),
+            quantity = order_json.get('quantity'),
+            filled_quantity = order_json.get('filledQuantity'),
+            remaining_quantity = order_json.get('remainingQuantity'),
+            requested_destination = order_json.get('requestedDestination'),
+            order_strategy_type = order_json.get('orderStrategyType'),
+            status = order_json.get('status'),
+            price = order_json.get('price'),
+            order_duration = order_json.get('orderDuration'),
+            order_class = order_json.get('orderClass')
+      )
+      if 'cancelTime' in order_json:
+         order.cancel_time = datetime.strptime(order_json.get('cancelTime'),"%Y-%m-%dT%H:%M:%S%z")
+
+      session.add(order)
+      session.commit()
+
+      for order_item in order_json['orderLegCollection']:
+         strike_price = None
+         multiplier = 1
+         if order_item.get('orderLegType') == 'OPTION':
+            strike_price = order_item['instrument'].get('symbol')[-8:-2]
+            strike_price = int(strike_price) / 10  # Convert to a decimal number
+         if 'instrument' in order_item and 'optionDeliverables' in order_item['instrument']:
+            multiplier = order_item['instrument']['optionDeliverables'][0]['deliverableUnits']
+         else:
+            multiplier = 1
+
+         order_item = OrderItem(
+            account_id = account_id,
+            order_id = order_id,
+            order_leg_type = order_item.get('orderLegType'),
+            instruction = order_item.get('instruction'),
+            quantity = order_item.get('quantity'),
+            asset_type = order_item['instrument'].get('assetType'),
+            symbol = order_item['instrument'].get('symbol'),
+            description = order_item['instrument'].get('description'),
+            cusip = order_item['instrument'].get('cusip'),
+            put_call = order_item['instrument'].get('putCall'),
+            underlying_symbol = order_item['instrument'].get('underlyingSymbol'),
+            maturity_date = order_item['instrument'].get('maturityDate'),
+            strike_price = strike_price,
+            multiplier = multiplier,
+            order_item_id = order_item.get('legId')
+         )
+         session.add(order_item)
+
+   session.commit()
+   return {'new_orders': new_orders, 'updated_orders': updated_orders, 'skipped_orders': skipped_orders}
+
+def store_positions(account_id, positions_json: str):
+   """
+   Transform and load positions
+   """
+   
+   date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+   if account_id is None:
+      logger.error(f'Account ID {positions_json["securitiesAccount"]["accountNumber"]} not found in the database. Skipping')
+      return
+   if 'shortQuantity' not in positions_json['securitiesAccount']['positions'][0]:
+      logger.error(f'No positions found in the response. Skipping')
+      return
+
+   # Reset the latest positions in the database
+   reset_latest_positions(account_id)
+
+   for position_json in positions_json['securitiesAccount']['positions']:
+
+      position = Position(
+         account_id = account_id,
+         date = date,
+         short_quantity = position_json['shortQuantity'],
+         long_quantity = position_json['longQuantity'],
+         average_price = position_json['averagePrice'],
+         maintenance_requirement = position_json['maintenanceRequirement'],
+         current_day_profit_loss = position_json['currentDayProfitLoss'],
+         market_value = position_json['marketValue'],
+         current_day_profit_loss_percentage = position_json['currentDayProfitLossPercentage'],
+         cusip = position_json['instrument'].get('cusip'),
+         asset_type = position_json['instrument'].get('putCall', position_json['instrument'].get('assetType')),
+         symbol = position_json['instrument'].get('symbol'),
+         underlying_symbol = position_json['instrument'].get('underlyingSymbol', position_json['instrument'].get('symbol')),
+         description = position_json['instrument'].get('description'),
+         variable_rate = position_json['instrument'].get('variableRate'),
+         net_change = position_json['instrument'].get('netChange',0),
+         latest = 'Y'
+      )
+      if 'maturityDate' in position_json['instrument']:
+         position.maturity_date = datetime.strptime(position_json['instrument'].get('maturityDate'), "%Y-%m-%dT%H:%M:%S.%f%z")
+      if position.asset_type == 'COLLECTIVE_INVESTMENT':
+         position.asset_type = 'EQUITY'
+      session.add(position)
+
+   session.commit()
+   return
 
 def store_transactions(account_id: int, transactions: list) -> dict:
    """
@@ -328,136 +415,49 @@ def load_fixed_income(transaction: Transaction, transferItem: dict, assetType: s
    session.add(transaction_item)
    return
 
-def store_orders(account_id: int, orders: list) -> dict:
+def get_transactions_from_db() -> list:
    """
-   Transform and load orders.  
-   Orders can change status so we need to update db rows if api status != db status
+   Get transaction IDs from the database using SQLAlchemy ORM.
    """
-   existing_orders = get_orders_from_db()
 
-   skipped_orders = 0
-   updated_orders = 0
-   new_orders = 0
-   for order_json in orders:
-      order_id = order_json.get('orderId')
-      status = order_json.get('status')
+   # Query the database directly using the Account model
+   transaction_query = session.query(Transaction.transaction_id).all()
 
-      if order_id in existing_orders and existing_orders[order_id] == status:
-         # Order exists in db but has the same status as the one from the API
-         # Skip
-         skipped_orders += 1
-         continue
-      elif order_id in existing_orders and existing_orders[order_id] != status:
-         # Order exists in the db and status has changed
-         # Delete the order from the db and insert the the updated one from the API
-         # Rows in order_items table will be deleted by the cascade delete
-         session.query(Order).filter(Order.order_id == order_id).delete()
-         session.commit()
-         updated_orders += 1
-      else:
-         # Order does not exist in the db
-         new_orders += 1
+   # Convert the query result to a list
+   return [id[0] for id in transaction_query]
 
-      order = Order(
-            account_id = account_id,
-            entered_time = datetime.strptime(order_json.get('enteredTime'),"%Y-%m-%dT%H:%M:%S%z"),
-            order_id = order_json.get('orderId'),
-            order_type = order_json.get('orderType'),
-            quantity = order_json.get('quantity'),
-            filled_quantity = order_json.get('filledQuantity'),
-            remaining_quantity = order_json.get('remainingQuantity'),
-            requested_destination = order_json.get('requestedDestination'),
-            order_strategy_type = order_json.get('orderStrategyType'),
-            status = order_json.get('status'),
-            price = order_json.get('price'),
-            order_duration = order_json.get('orderDuration'),
-            order_class = order_json.get('orderClass')
-      )
-      if 'cancelTime' in order_json:
-         order.cancel_time = datetime.strptime(order_json.get('cancelTime'),"%Y-%m-%dT%H:%M:%S%z")
-
-      session.add(order)
-      session.commit()
-
-      for order_item in order_json['orderLegCollection']:
-         strike_price = None
-         multiplier = 1
-         if order_item.get('orderLegType') == 'OPTION':
-            strike_price = order_item['instrument'].get('symbol')[-8:-2]
-            strike_price = int(strike_price) / 10  # Convert to a decimal number
-         if 'instrument' in order_item and 'optionDeliverables' in order_item['instrument']:
-            multiplier = order_item['instrument']['optionDeliverables'][0]['deliverableUnits']
-         else:
-            multiplier = 1
-
-         order_item = OrderItem(
-            account_id = account_id,
-            order_id = order_id,
-            order_leg_type = order_item.get('orderLegType'),
-            instruction = order_item.get('instruction'),
-            quantity = order_item.get('quantity'),
-            asset_type = order_item['instrument'].get('assetType'),
-            symbol = order_item['instrument'].get('symbol'),
-            description = order_item['instrument'].get('description'),
-            cusip = order_item['instrument'].get('cusip'),
-            put_call = order_item['instrument'].get('putCall'),
-            underlying_symbol = order_item['instrument'].get('underlyingSymbol'),
-            maturity_date = order_item['instrument'].get('maturityDate'),
-            strike_price = strike_price,
-            multiplier = multiplier,
-            order_item_id = order_item.get('legId')
-         )
-         session.add(order_item)
-
-   session.commit()
-   return {'new_orders': new_orders, 'updated_orders': updated_orders, 'skipped_orders': skipped_orders}
-
-def store_positions(account_id, positions_json: str):
+def get_accounts_from_db() -> dict:
    """
-   Transform and load positions
+   Get accounts from the database
    """
-   
-   date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+      
+   # Query the database directly using the Account model
+   accounts_query = session.query(Account.account_number, Account.account_id).all()
 
-   if account_id is None:
-      logger.error(f'Account ID {positions_json["securitiesAccount"]["accountNumber"]} not found in the database. Skipping')
-      return
-   if 'shortQuantity' not in positions_json['securitiesAccount']['positions'][0]:
-      logger.error(f'No positions found in the response. Skipping')
-      return
+   # Convert the query result to a dictionary
+   return  {account_number: account_id for account_number, account_id in accounts_query}
 
-   # Reset the latest positions in the database
-   reset_latest_positions(account_id)
+def get_orders_from_db() -> dict:
+   """
+   Get order IDs and status from the database
+   """
+      
+   # Query the database directly using the Account model
+   orders_query = session.query(Order.order_id, Order.status).all()
 
-   for position_json in positions_json['securitiesAccount']['positions']:
+   # Convert the query result to a dictionary
+   return  {order_id: status for order_id, status in orders_query}
 
-      position = Position(
-         account_id = account_id,
-         date = date,
-         short_quantity = position_json['shortQuantity'],
-         long_quantity = position_json['longQuantity'],
-         average_price = position_json['averagePrice'],
-         maintenance_requirement = position_json['maintenanceRequirement'],
-         current_day_profit_loss = position_json['currentDayProfitLoss'],
-         market_value = position_json['marketValue'],
-         current_day_profit_loss_percentage = position_json['currentDayProfitLossPercentage'],
-         cusip = position_json['instrument'].get('cusip'),
-         asset_type = position_json['instrument'].get('putCall', position_json['instrument'].get('assetType')),
-         symbol = position_json['instrument'].get('symbol'),
-         underlying_symbol = position_json['instrument'].get('underlyingSymbol', position_json['instrument'].get('symbol')),
-         description = position_json['instrument'].get('description'),
-         variable_rate = position_json['instrument'].get('variableRate'),
-         net_change = position_json['instrument'].get('netChange',0),
-         latest = 'Y'
-      )
-      if 'maturityDate' in position_json['instrument']:
-         position.maturity_date = datetime.strptime(position_json['instrument'].get('maturityDate'), "%Y-%m-%dT%H:%M:%S.%f%z")
-      if position.asset_type == 'COLLECTIVE_INVESTMENT':
-         position.asset_type = 'EQUITY'
-      session.add(position)
+def set_log_file(logger: logging.Logger, filename: str):
+    # Create a file handler
+    handler = logging.FileHandler(filename)
 
-   session.commit()
-   return
+    # Create a formatter and add it to the handler
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+
+    # Add the handler to the logger
+    logger.addHandler(handler)
 
 def reset_latest_positions(account_id: int ):
    """
@@ -470,7 +470,6 @@ def reset_latest_positions(account_id: int ):
    session.query(Position).filter(Position.account_id == account_id).update({Position.latest: 'N'})
    session.commit()
    return
-
 
 if __name__ == '__main__':
    
