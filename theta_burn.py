@@ -448,17 +448,6 @@ def get_orders_from_db() -> dict:
    # Convert the query result to a dictionary
    return  {order_id: status for order_id, status in orders_query}
 
-def set_log_file(logger: logging.Logger, filename: str):
-    # Create a file handler
-    handler = logging.FileHandler(filename)
-
-    # Create a formatter and add it to the handler
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-
-    # Add the handler to the logger
-    logger.addHandler(handler)
-
 def reset_latest_positions(account_id: int ):
    """
    Reset the latest positions in the database using SQLAlchemy ORM
@@ -470,6 +459,17 @@ def reset_latest_positions(account_id: int ):
    session.query(Position).filter(Position.account_id == account_id).update({Position.latest: 'N'})
    session.commit()
    return
+
+def set_log_file(logger: logging.Logger, filename: str):
+    # Create a file handler
+    handler = logging.FileHandler(filename)
+
+    # Create a formatter and add it to the handler
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+
+    # Add the handler to the logger
+    logger.addHandler(handler)
 
 if __name__ == '__main__':
    
