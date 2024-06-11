@@ -2,7 +2,7 @@ import json
 import pandas as pd
 
 from orm.database import Database
-from orm.models import Transaction, Account, Order, OrderItem, Position
+from orm.models import Transaction, TransactionItem, Account, Order, OrderItem, Position
 from sqlalchemy import text, update, select, func
 
 import os
@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 
 from broker.schwab import api, stream
 from datetime import datetime, timedelta
-
 
 app = Typer()
 
@@ -83,8 +82,16 @@ def process_transaction_files( import_dir: str = './data/import',
          continue
 
       with open(os.path.join(import_dir, filename), 'r') as f:
-         activities = json.load(f)
-      load_activities(activities)
+         transactions = json.load(f)
+
+      accounts = get_accounts_from_db()
+      account_id = accounts.get(transactions[0]['accountId'], None)
+
+      if account_id is None:
+         logger.error(f'Account ID {transactions[0]["accountId"]} not found in the database. Skipping')
+         continue
+
+      store_transactions(account_id, transactions)
 
       # Move the file to the processed directory
       os.rename(os.path.join(import_dir, filename), os.path.join(import_dir, 'processed', filename))
@@ -112,14 +119,19 @@ def get_transactions(account: Annotated[List[str], Option(..., "--account", help
    else:
       end_date = datetime.strptime(end_date, '%Y-%m-%d')
 
+   accounts = get_accounts_from_db()
    for account_number in account:
       api.initialize(accountNumber=account_number)
 
+      account_id = accounts.get(int(account_number), None)
+
       for transaction_type in ('TRADE', 'DIVIDEND_OR_INTEREST'):
-         activities = api.transactions.transactions(start_date, end_date, transaction_type).json()
+         logger.info(f'Getting {transaction_type} transactions for account {account_number}')
+         transactions = api.transactions.transactions(start_date, end_date, transaction_type).json()
          if debug:
-            print(json.dumps(activities, indent=2))
-         load_activities(activities)
+            print(json.dumps(transactions, indent=2))
+         result = store_transactions(account_id, transactions)
+         logger.info(f'Loaded {result["new_transactions"]} new transactions, skipped {result["skipped_transactions"]} transactions')
    return
 
 @app.command()
@@ -175,6 +187,147 @@ def get_orders(account: Annotated[List[str], Option(..., "--account", help="One 
       result = store_orders(account_id, orders)
       logger.info(f'Loaded {result["new_orders"]} new orders, updated {result["updated_orders"]} orders, skipped {result["skipped_orders"]} orders')
 
+def store_transactions(account_id: int, transactions: list) -> dict:
+   """
+   Transform and load transactions
+   """
+   existing_transactions = get_transactions_from_db()
+
+   skipped_transactions = 0
+   new_transactions = 0
+   for transaction_json in transactions:
+      if int(transaction_json['activityId']) in existing_transactions:
+         skipped_transactions += 1
+         continue
+
+      transaction = Transaction(
+         transaction_id = transaction_json['activityId'],
+         account_id = account_id,
+         date = datetime.strptime(transaction_json['time'], "%Y-%m-%dT%H:%M:%S%z"),
+         type = transaction_json['type'],
+         status = transaction_json['status'],
+         amount = transaction_json['netAmount'],
+         order_id = transaction_json.get('orderId'),
+         description = transaction_json.get('description'),
+         position_id = transaction_json.get('positionId')
+      )
+      session.add(transaction)
+      new_transactions += 1
+
+      for transferItem in transaction_json['transferItems']:
+         assetType = transferItem['instrument']['assetType']
+         load_dividend_or_interest(transaction, transferItem, assetType)
+         load_fee(transaction, transferItem, assetType)
+         load_option(transaction, transferItem, assetType)
+         load_equity(transaction, transferItem, assetType)
+         load_fixed_income(transaction, transferItem, assetType)
+   session.commit()
+   return {'new_transactions': new_transactions, 'skipped_transactions': skipped_transactions}
+
+def load_dividend_or_interest(transaction: dict, transferItem: dict, assetType: str):
+
+   """
+   transform activity of type dividend_or_interest to a transaction item
+   """
+
+
+   if transaction.type != 'DIVIDEND_OR_INTEREST':
+      return
+
+   transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
+                                       asset_type = assetType,
+                                       transaction = 'DIVIDEND',
+                                       amount = transferItem['amount'],
+                                       extended_amount = transferItem['amount'],
+                                       quantity = 0)
+                                      
+                                    
+   # Check to see if description contains the word interest
+   if 'interest' in transaction.description.lower():
+      transaction_item.transaction = 'INTEREST'
+   else:
+      transaction_item.transaction = 'DIVIDEND'
+
+   if 'dividend~' in transaction.description.lower():
+      transaction_item.symbo = transaction.description.split('~')[1].strip()
+   session.add(transaction_item)
+   return
+
+def load_fee(transaction: Transaction, transferItem: dict, assetType: str):
+   if transaction.type != 'TRADE' or assetType != 'CURRENCY':
+      return
+
+   transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
+                                       asset_type = assetType,
+                                       transaction = 'FEE',
+                                       amount = transferItem['amount'],
+                                       extended_amount = transferItem['amount'],
+                                       quantity = 0)
+   if 'feeType' in transferItem:
+      transaction_item.description = transferItem['feeType']
+   else:
+      transaction_item.description = 'Not Specified'
+   session.add(transaction_item)
+   return
+
+def load_option(transaction: Transaction, transferItem: dict, assetType: str):
+   if assetType != 'OPTION':
+      return
+
+   transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
+                                       asset_type = assetType,
+                                       transaction = 'BUY' if transferItem['amount'] > 0 else 'SELL',
+                                       amount = transferItem['price'],
+                                       extended_amount = transferItem['cost'],
+                                       quantity = abs(transferItem['amount']),
+                                       symbol = transferItem['instrument']['symbol'],
+                                       description = transferItem['instrument']['description'],
+                                       strike_price = transferItem['instrument']['strikePrice'],
+                                       underlying = transferItem['instrument']['underlyingSymbol'],
+                                       position_effect = transferItem.get('positionEffect'))
+
+   if 'expirationDate' in transferItem['instrument']:
+      transaction_item.expiration_date = datetime.strptime(transferItem['instrument']['expirationDate'],"%Y-%m-%dT%H:%M:%S%z")
+
+   session.add(transaction_item)
+   return
+
+def load_equity(transaction: Transaction, transferItem: dict, assetType: str):
+   if assetType != 'EQUITY':
+      return
+
+   transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
+                                       asset_type = assetType,
+                                       transaction = 'BUY' if transferItem['amount'] > 0 else 'SELL',
+                                       amount = transferItem['price'],
+                                       extended_amount = transferItem['cost'],
+                                       quantity = abs(transferItem['amount']),
+                                       symbol = transferItem['instrument']['symbol'],
+                                       description = transferItem['instrument']['description'])
+   session.add(transaction_item)
+   return
+
+def load_fixed_income(transaction: Transaction, transferItem: dict, assetType: str):
+   if assetType != 'FIXED_INCOME':
+      return
+
+   transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
+                                       asset_type = assetType,
+                                       transaction = 'BUY' if transferItem['amount'] > 0 else 'SELL',
+                                       extended_amount = transferItem['cost'],
+                                       quantity = abs(transferItem['amount']),
+                                       symbol = transferItem['instrument']['symbol'],
+                                       description = transferItem['instrument']['description'])
+
+   maturity_date = transferItem['instrument'].get('maturityDate')
+   if maturity_date:
+      transaction_item.expiration_date = datetime.strptime(maturity_date, "%Y-%m-%dT%H:%M:%S%z")
+   multiplier = transferItem['instrument'].get('multiplier', 1)
+   transaction_item.multiplier = multiplier
+   transaction_item.amount = transferItem['price'] * multiplier
+   session.add(transaction_item)
+   return
+
 def store_orders(account_id: int, orders: list) -> dict:
    """
    Transform and load orders
@@ -209,7 +362,6 @@ def store_orders(account_id: int, orders: list) -> dict:
             entered_time = datetime.strptime(order_json.get('enteredTime'),"%Y-%m-%dT%H:%M:%S%z"),
             order_id = order_json.get('orderId'),
             order_type = order_json.get('orderType'),
-            cancel_time = datetime.strptime(order_json.get('cancelTime'),"%Y-%m-%dT%H:%M:%S%z"),
             quantity = order_json.get('quantity'),
             filled_quantity = order_json.get('filledQuantity'),
             remaining_quantity = order_json.get('remainingQuantity'),
@@ -219,7 +371,10 @@ def store_orders(account_id: int, orders: list) -> dict:
             price = order_json.get('price'),
             order_duration = order_json.get('orderDuration'),
             order_class = order_json.get('orderClass')
-            )
+      )
+      if 'cancelTime' in order_json:
+         order.cancel_time = datetime.strptime(order_json.get('cancelTime'),"%Y-%m-%dT%H:%M:%S%z")
+
       session.add(order)
       session.commit()
 
@@ -315,210 +470,6 @@ def reset_latest_positions(account_id: int ):
    session.commit()
    return
 
-def load_activities(activities: list):
-   """
-   Load activities into the database
-   """
-   account_id = None
-
-   # Get the existing transactions and accounts from the database
-   existing_transactions = get_transactions_from_db()
-   accounts = get_accounts_from_db()
-
-   i = 0
-   for i, activity in enumerate(activities):
-
-      account_id = accounts.get(int(activity['accountNumber']), None)
-      if account_id is None:
-         logger.error(f'Account ID {activity["accountNumber"]} not found in the database. Skipping')
-         continue
-      if int(activity['activityId']) in existing_transactions:
-         logger.error(f'Transaction: {activity["activityId"]} alraday exists in the database. Skipping')
-         continue
-      transaction = load_transaction(activity, account_id)
-
-      for transferItem in activity['transferItems']:
-         assetType = transferItem['instrument']['assetType']
-         load_dividend_or_interest(transaction, activity, transferItem, assetType)
-         load_fee(transaction, activity, transferItem, assetType)
-         load_option(transaction, activity, transferItem, assetType)
-         load_equity(transaction, activity, transferItem, assetType)
-      
-   transaction_count = store_transactions(transactions, transaction_items)
-   logger.info(f'{transaction_count} transactions loaded to the db')
-   transactions.clear()
-   transaction_items.clear()
-
-   logger.info(f'Processed {i+1} transactions')
-
-   return
-
-def load_transaction(activity: dict, account_id: int):
-   """
-   Transform and load activity into a transaction
-   """
-   transaction = {
-         'transaction_id': activity['activityId'],
-         'date': activity['time'],
-         'account_id': account_id,
-         'type': activity['type'],
-         'status': activity['status'],
-         'amount': activity['netAmount'],
-         'order_id': activity.get('orderId'),
-         'description': activity.get('description'),
-         'position_id': activity.get('positionId')
-   }
-   transactions.append(transaction)
-   return transaction
-
-def load_dividend_or_interest(transaction: dict, activity: dict, transferItem: dict, assetType: str):
-
-   """
-   transform activity of type dividend_or_interest to a transaction item
-   """
-   item = {}
-
-   if transaction['type'] != 'DIVIDEND_OR_INTEREST':
-      return
-
-   item['transaction_id'] = activity['activityId']
-   item['asset_type'] = assetType
-
-   # Check to see if description contains the word interest
-   if 'interest' in transaction['description'].lower():
-      item['transaction'] = 'INTEREST'
-   else:
-      item['transaction'] = 'DIVIDEND'
-
-   if 'dividend~' in transaction['description'].lower():
-      item['symbol'] = transaction['description'].split('~')[1].strip()
-   item['amount'] = transferItem['amount']
-   item['extended_amount'] = transferItem['amount']
-   item['quantity'] = 0
-
-   transaction_items.append(item)
-
-   return
-
-def load_fee(transaction: dict, activity: dict,transferItem: dict, assetType: str):
-   if transaction['type'] != 'TRADE' or assetType != 'CURRENCY':
-      return
-
-   item = {} 
-   item['transaction_id'] = activity['activityId']
-   item['asset_type'] = assetType
-
-   item['amount'] = transferItem['cost']
-   item['extended_amount'] = transferItem['cost']
-   item['quantity'] = 0
-   item['transaction'] = 'FEE'
-   if 'feeType' in transferItem:
-      item['description'] = transferItem['feeType']
-   else:
-      item['description'] = 'Not Specified'
-
-   transaction_items.append(item)
-   return
-
-def load_option(transaction: dict, activity: dict, transferItem: dict, assetType: str):
-   if assetType != 'OPTION':
-      return
-
-   item = {}
-
-   item['transaction_id'] = activity['activityId']
-   item['asset_type'] = transferItem['instrument']['putCall']
-   item['symbol'] = transferItem['instrument'].get('symbol')  
-   item['description'] = transferItem['instrument']['description']
-   item['expiration_date'] = transferItem['instrument']['expirationDate']
-   item['strike_price'] = transferItem['instrument']['strikePrice']
-   item['underlying'] = transferItem['instrument']['underlyingSymbol']
-   item['quantity'] = abs(transferItem['amount'])
-   item['amount'] = transferItem['price']
-   item['extended_amount'] = transferItem['cost']
-   item['position_effect'] = transferItem.get('positionEffect')
-   if transferItem['amount'] < 0:
-      item['transaction'] = 'SELL'
-   else:
-      item['transaction'] = 'BUY'
-
-   transaction_items.append(item)
-   return
-
-def load_equity(transaction: dict, activity: dict, transferItem: dict, assetType: str):
-   if assetType != 'EQUITY':
-      return
-
-   item = {}
-
-   item['transaction_id'] = activity['activityId']
-   item['asset_type'] = assetType
-
-   item['symbol'] = transferItem['instrument']['symbol']
-   item['quantity'] = abs(transferItem['amount'])
-   item['amount'] = transferItem['price']
-   item['extended_amount'] = transferItem['cost']
-   if transferItem['cost'] > 0:
-      item['transaction'] = 'SELL'
-   else:
-      item['transaction'] = 'BUY'
-
-   transaction_items.append(item)
-
-   return
-
-def load_fixed_income(transaction: dict, activity: dict, transferItem: dict, assetType: str):
-   if assetType != 'FIXED_INCOME':
-      return
-
-   item = {}
-
-   item['transaction_id'] = activity['activityId']
-   item['asset_type'] = assetType
-
-   item['symbol'] = transferItem['instrument']['symbol']
-   item['quantity'] = abs(transferItem['amount'])
-
-   multiplier = 1
-   if 'multiplier' in transferItem['instrument']:
-      multiplier = transferItem['instrument']['multiplier']
-
-   item['amount'] = transferItem['price'] * multiplier
-   item['extended_amount'] = transferItem['cost']
-   item['expiration_date'] = transferItem['instrument']['maturityDate']
-   if transferItem['amount'] > 0:
-      item['transaction'] = 'BUY'
-   else:
-      item['transaction'] = 'SELL'
-
-   transaction_items.append(item)
-
-   return
-
-def store_transactions(transactions: list, transaction_items: list) -> int:
-   """
-   Store transactions and transaction_items in the database
-   """
-
-   if len(transactions) == 0:
-      logger.info('No transactions to store in the database. Exiting.')
-      return 0
-   
-   # Create a DataFrame from the orders list
-   transactions_df = pd.DataFrame(transactions)
-   transactions_df['date'] = pd.to_datetime(transactions_df['date'])
- 
-   transaction_items_df = pd.DataFrame(transaction_items)
-
-   # Check to see if expiration_date is a column in the DataFrame
-   if 'expiration_date' in transaction_items_df.columns:
-      transaction_items_df['expiration_date'] = pd.to_datetime(transaction_items_df['expiration_date'])
-
-   # Write the DataFrame to the database
-   transactions_df.to_sql('transactions', engine, if_exists='append', index=False)
-   transaction_items_df.to_sql('transaction_items', engine, if_exists='append', index=False)
-  
-   return len(transactions)
 
 if __name__ == '__main__':
    
@@ -549,10 +500,7 @@ if __name__ == '__main__':
 
    # Add handler to logger
    logger.addHandler(handler)
-   
-   transactions = []
-   transaction_items = []
-   
+
    app()
    db.close()
 

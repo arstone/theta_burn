@@ -38,21 +38,23 @@ CREATE TABLE account_balances (
     balance DECIMAL(15, 2),
     date DATE,
     PRIMARY KEY (id),
-    FOREIGN KEY (account_id) REFERENCES accounts(account_id)
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
 );
 
 create table strategies (
     strategy_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
     description VARCHAR(255) NOT NULL,
-    author VARCHAR(255) NOT NULL
+    author VARCHAR(255) NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
 create table trades (
     trade_id bigint AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
     user_trade_id INT NOT NULL default 0,
     strategy_id INT NOT NULL,
+    user_id INT NOT NULL,
     account_id INT NOT NULL,
     open_date DATE NOT NULL,
     close_date DATE NOT NULL,
@@ -69,9 +71,9 @@ create table trades (
     adjustments INT default 0,
     comment VARCHAR(1024), 
     description VARCHAR(255) NOT NULL,
-    FOREIGN KEY (strategy_id) REFERENCES strategies(strategy_id),
-    FOREIGN KEY (account_id) REFERENCES accounts(account_id),
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    FOREIGN KEY (strategy_id) REFERENCES strategies(strategy_id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
 DELIMITER //
@@ -83,7 +85,7 @@ END;//
 DELIMITER ;
 
 create table transactions (
-    transaction_id bigint PRIMARY KEY,
+    transaction_id bigint,
     account_id INT NOT NULL,
     date DATE NOT NULL,
     type VARCHAR(255) NOT NULL,
@@ -92,7 +94,8 @@ create table transactions (
     position_id bigint,
     amount DECIMAL(10,2) NOT NULL,
     description VARCHAR(255),
-    FOREIGN KEY (account_id) REFERENCES accounts(account_id));
+    PRIMARY KEY (transaction_id, account_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE);
 
 create table transaction_items (
     item_id bigint AUTO_INCREMENT PRIMARY KEY,
@@ -164,7 +167,8 @@ create table positions (
     description TEXT,
     maturity_date DATETIME,
     variable_rate DECIMAL(10, 2),
-    latest CHAR(1) DEFAULT 'N'
+    latest CHAR(1) DEFAULT 'N',
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
 );
 
 CREATE TABLE orders (
@@ -187,6 +191,7 @@ CREATE TABLE orders (
 );
 
 CREATE TABLE order_items (
+    account_id INT,
     order_id BIGINT,
     order_leg_type VARCHAR(255),
     instruction VARCHAR(255),
@@ -201,7 +206,8 @@ CREATE TABLE order_items (
     strike_price DECIMAL(10, 2),
     multiplier INT,
     order_item_id INT,
-    PRIMARY KEY (order_id, order_item_id)
+    PRIMARY KEY (account_id, order_id, order_item_id),
+    FOREIGN KEY (account_id, order_id) REFERENCES orders(account_id, order_id) ON DELETE CASCADE
 );
 
 create or replace view transaction_view as (
