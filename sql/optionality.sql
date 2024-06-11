@@ -111,7 +111,7 @@ create table transaction_items (
     underlying VARCHAR(255),
     extended_amount DECIMAL(10,2),
     position_effect VARCHAR(255),
-    FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id));
+    FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE CASCADE);
 
 create table quotes (
     quote_id bigint AUTO_INCREMENT PRIMARY KEY,

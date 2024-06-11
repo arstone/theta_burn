@@ -275,7 +275,7 @@ def load_option(transaction: Transaction, transferItem: dict, assetType: str):
       return
 
    transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
-                                       asset_type = assetType,
+                                       asset_type = transferItem['instrument']['putCall'],
                                        transaction = 'BUY' if transferItem['amount'] > 0 else 'SELL',
                                        amount = transferItem['price'],
                                        extended_amount = transferItem['cost'],
@@ -330,7 +330,8 @@ def load_fixed_income(transaction: Transaction, transferItem: dict, assetType: s
 
 def store_orders(account_id: int, orders: list) -> dict:
    """
-   Transform and load orders
+   Transform and load orders.  
+   Orders can change status so we need to update db rows if api status != db status
    """
    existing_orders = get_orders_from_db()
 
