@@ -11,9 +11,9 @@ import logging
 from typer import Typer, Option
 from typing import List, Annotated
 from dotenv import load_dotenv
-
-from broker.schwab import api, stream
 from datetime import datetime, timedelta
+
+import schwabdev
 
 app = Typer()
 
@@ -40,9 +40,13 @@ def process_transaction_files( import_dir: str = './data/import',
       with open(os.path.join(import_dir, filename), 'r') as f:
          transactions = json.load(f)
 
-      accounts = get_accounts_from_db()
-      account_id = accounts.get(transactions[0]['accountId'], None)
+      accounts = get_accounts()
+      account_number = transactions[0].get('accountId')
+      if account_number is None:
+         logger.error(f'Account number not found in the transaction file. Skipping')
+         continue
 
+      account_id = accounts[account_number].get('account_id', None)
       if account_id is None:
          logger.error(f'Account ID {transactions[0]["accountId"]} not found in the database. Skipping')
          continue
@@ -56,7 +60,7 @@ def process_transaction_files( import_dir: str = './data/import',
    return
 
 @app.command()
-def get_transactions(account: Annotated[List[str], Option(..., "--account", help="One or more account numbers")],
+def get_transactions(account: Annotated[List[int], Option(..., "--account", help="One or more account numbers")],
                      days: int = Option(7, help="Number of days back from current date to get transactions for"),
                      start_date: str = Option(None, help="start date of date range to pull transactions for"),
                      end_date: str = Option(None, help="end date of date range to pull transactions for"),
@@ -75,15 +79,21 @@ def get_transactions(account: Annotated[List[str], Option(..., "--account", help
    else:
       end_date = datetime.strptime(end_date, '%Y-%m-%d')
 
-   accounts = get_accounts_from_db()
+   accounts = get_accounts()
    for account_number in account:
-      api.initialize(accountNumber=account_number)
-
-      account_id = accounts.get(int(account_number), None)
+     
+      account_id = accounts[account_number].get('account_id', None)
+      account_hash = accounts[account_number].get('account_hash', None)
+      if account_id is None:
+         logger.error(f'Account ID {account_number} not found in the database. Skipping')
+         continue
+      if account_hash is None:
+         logger.error(f'Account hash for account number {account_number} not found in the database. Skipping')
+         continue
 
       for transaction_type in ('TRADE', 'DIVIDEND_OR_INTEREST'):
          logger.info(f'Getting {transaction_type} transactions for account {account_number}')
-         transactions = api.transactions.transactions(start_date, end_date, transaction_type).json()
+         transactions = client.transactions(account_hash, start_date, end_date, transaction_type).json()
          if debug:
             print(json.dumps(transactions, indent=2))
          result = store_transactions(account_id, transactions)
@@ -91,26 +101,33 @@ def get_transactions(account: Annotated[List[str], Option(..., "--account", help
    return
 
 @app.command()
-def get_positions(account: Annotated[List[str], Option(..., "--account", help="One or more account numbers")],
+def get_positions(account: Annotated[List[int], Option(..., "--account", help="One or more account numbers")],
                   debug: bool = Option(None, help="print the transaction json")) -> list:
 
+   accounts = get_accounts()
+
    for account_number in account:
-      api.initialize(accountNumber=account_number)
-      positions_json = api.accounts.getAccount(fields="positions").json()
+      account_id = accounts[account_number].get('account_id', None)
+      account_hash = accounts[account_number].get('account_hash', None)
+      if account_id is None:
+         logger.error(f'Account ID {account_number} not found in the database. Skipping')
+         continue
+      if account_hash is None:
+         logger.error(f'Account hash for account number {account_number} not found in the database. Skipping')
+         continue
+
+      positions_json = client.account_details(account_hash, fields="positions").json()
 
       if debug:
          print(json.dumps(positions_json, indent=2))
-      
-      accounts = get_accounts_from_db()
-      account_id = accounts.get(int(positions_json['securitiesAccount']['accountNumber']), None)
-
+     
       results = store_positions(account_id, positions_json)
       logger.info(f'Updated {results}')
       
    return
 
 @app.command()
-def get_orders(account: Annotated[List[str], Option(..., "--account", help="One or more account numbers")],
+def get_orders(account: Annotated[List[int], Option(..., "--account", help="One or more account numbers")],
                      days: int = Option(7, help="Number of days back from current date to get transactions for"),
                      start_date: str = Option(None, help="start date of date range to pull transactions for"),
                      end_date: str = Option(None, help="end date of date range to pull transactions for"),
@@ -130,13 +147,20 @@ def get_orders(account: Annotated[List[str], Option(..., "--account", help="One 
    else:
       end_date = datetime.strptime(end_date, '%Y-%m-%d')
 
+   accounts = get_accounts()
+
+   
    for account_number in account:
-      api.initialize(accountNumber=account_number)
+      account_id = accounts[account_number].get('account_id', None)
+      account_hash = accounts[account_number].get('account_hash', None)
+      if account_id is None:
+         logger.error(f'Account ID {account_number} not found in the database. Skipping')
+         continue
+      if account_hash is None:
+         logger.error(f'Account hash for account number {account_number} not found in the database. Skipping')
+         continue
 
-      accounts = get_accounts_from_db()
-      account_id = accounts.get(int(account_number), None)
-
-      orders = api.orders.getOrders(maxResults=5000, fromEnteredTime=start_date, toEnteredTime=end_date, status=status).json()
+      orders = client.account_orders(account_hash, maxResults=5000, fromEnteredTime=start_date, toEnteredTime=end_date, status=status).json()
       if debug:
          print(json.dumps(orders, indent=2))
 
@@ -244,7 +268,7 @@ def store_positions(account_id, positions_json: str):
    # Reset the latest positions in the database
    reset_latest_positions(account_id)
 
-   for position_json in positions_json['securitiesAccount']['positions']:
+   for i, position_json in enumerate(positions_json['securitiesAccount']['positions']):
 
       position = Position(
          account_id = account_id,
@@ -272,7 +296,7 @@ def store_positions(account_id, positions_json: str):
       session.add(position)
 
    session.commit()
-   return
+   return {'positions': i}
 
 def store_transactions(account_id: int, transactions: list) -> dict:
    """
@@ -426,16 +450,31 @@ def get_transactions_from_db() -> list:
    # Convert the query result to a list
    return [id[0] for id in transaction_query]
 
-def get_accounts_from_db() -> dict:
-   """
-   Get accounts from the database
-   """
-      
-   # Query the database directly using the Account model
-   accounts_query = session.query(Account.account_number, Account.account_id).all()
+def get_accounts() -> dict:
+    """
+    Get accounts from the database and the API
+    """
+    
+    # Query the database directly using the Account model
+    accounts_query_result = session.query(Account.account_number, Account.account_id).all()
 
-   # Convert the query result to a dictionary
-   return  {account_number: account_id for account_number, account_id in accounts_query}
+    # Convert query result to a dictionary for easy lookup
+    accounts_query = {account_number: account_id for account_number, account_id in accounts_query_result}
+
+    # Get account hashes from API
+    linked_accounts = client.account_linked().json()  # [{'accountNumber': 'XXXX', 'hashValue': 'XXXX'}]
+
+    # Convert the query result to a dictionary
+    accounts = {}
+    for linked_account in linked_accounts:
+        account_number = int(linked_account['accountNumber'])
+        account_hash = linked_account['hashValue']
+        account_id = accounts_query.get(account_number, None)
+        if account_id is None:
+            logger.error(f'Account ID for account number {account_number} not found in the database. Skipping')
+            continue
+        accounts[account_number] = {'account_id': account_id, 'account_hash': account_hash}
+    return accounts
 
 def get_orders_from_db() -> dict:
    """
@@ -500,6 +539,9 @@ if __name__ == '__main__':
 
    # Add handler to logger
    logger.addHandler(handler)
+
+   client = schwabdev.Client(os.getenv('appKey'), os.getenv('appSecret'))
+   client.update_tokens_auto()
 
    app()
    db.close()
