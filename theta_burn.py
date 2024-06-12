@@ -148,8 +148,6 @@ def get_orders(account: Annotated[List[int], Option(..., "--account", help="One 
    else:
       end_date = eastern(datetime.strptime(end_date, '%Y-%m-%d'))
 
-   print(f"start_date: {start_date}, end_date: {end_date}")
-
    accounts = get_accounts()
    for account_number in account:
       account_id = accounts[account_number].get('account_id', None)
@@ -516,6 +514,9 @@ def eastern(dt: datetime) -> datetime:
    Get the number of hours difference between current timezone and America/New_York
    This will be 4 or 5 depending on daylight savings time
    Get the current datetime in the local timezone
+   
+   This is a strange way to adjust the time to Eastern time but it is required because the Schwab API
+   does a flawed conversion of time format that can't handle datetime objects with timezone info.
    """
    
    local_datetime = datetime.now().astimezone()
@@ -530,7 +531,6 @@ def eastern(dt: datetime) -> datetime:
    hours_diff = offset_difference.total_seconds() / 3600
    
    return dt - timedelta(hours=hours_diff)
-
 
 if __name__ == '__main__':
    
