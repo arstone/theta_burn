@@ -598,7 +598,7 @@ if __name__ == '__main__':
    logger.addHandler(handler)
    
    client = schwabdev.Client(os.getenv('appKey'), os.getenv('appSecret'))
-   resp = client.update_tokens_auto()
+   client.update_tokens_auto()
 
    app()
    db.close()
