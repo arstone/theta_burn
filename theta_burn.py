@@ -1,4 +1,5 @@
 import json
+import requests
 import pandas as pd
 
 from orm.database import Database
@@ -94,9 +95,19 @@ def get_transactions(account: Annotated[List[int], Option(..., "--account", help
 
       for transaction_type in ('TRADE', 'DIVIDEND_OR_INTEREST'):
          logger.info(f'Getting {transaction_type} transactions for account {account_number}')
-         transactions = client.transactions(account_hash, start_date, end_date, transaction_type).json()
+         try:
+            resp = client.transactions(account_hash, start_date, end_date, transaction_type)
+            resp.raise_for_status()  # Raises an HTTPError if the response was an error
+            transactions = resp.json()
+         except requests.exceptions.HTTPError as e:
+            logger.error(f'HTTP error getting transactions: {e}')
+            continue
+         except ValueError as e:  # In case resp.json() fails to parse JSON
+            logger.error(f'Error parsing transactions response as JSON: {e}')
+            continue
          if debug:
             print(json.dumps(transactions, indent=2))
+
          result = store_transactions(account_id, transactions)
          logger.info(f'Loaded {result["new_transactions"]} new transactions, skipped {result["skipped_transactions"]} transactions')
    return
@@ -117,8 +128,16 @@ def get_positions(account: Annotated[List[int], Option(..., "--account", help="O
          logger.error(f'Account hash for account number {account_number} not found in the database. Skipping')
          continue
 
-      positions_json = client.account_details(account_hash, fields="positions").json()
-
+      try:
+         resp = client.account_details(account_hash, fields="positions")
+         resp.raise_for_status()  # Raises an HTTPError if the response was an error
+         positions_json = resp.json()
+      except requests.exceptions.HTTPError as e:
+         logger.error(f'HTTP error getting positions: {e}')
+         continue
+      except ValueError as e:  # In case resp.json() fails to parse JSON
+         logger.error(f'Error parsing positions response as JSON: {e}')
+         continue
       if debug:
          print(json.dumps(positions_json, indent=2))
      
@@ -159,7 +178,16 @@ def get_orders(account: Annotated[List[int], Option(..., "--account", help="One 
          logger.error(f'Account hash for account number {account_number} not found in the database. Skipping')
          continue
 
-      orders = client.account_orders(account_hash, maxResults=5000, fromEnteredTime=start_date, toEnteredTime=end_date, status=status).json()
+      try:
+         resp = client.account_orders(account_hash, maxResults=5000, fromEnteredTime=start_date, toEnteredTime=end_date, status=status)
+         resp.raise_for_status()  # Raises an HTTPError if the response was an error
+         orders = resp.json()
+      except requests.exceptions.HTTPError as e:
+         logger.error(f'HTTP error getting orders: {e}')
+         continue
+      except ValueError as e:  # In case resp.json() fails to parse JSON
+         logger.error(f'Error parsing orders response as JSON: {e}')
+         continue
       if debug:
          print(json.dumps(orders, indent=2))
 
@@ -450,30 +478,40 @@ def get_transactions_from_db() -> list:
    return [id[0] for id in transaction_query]
 
 def get_accounts() -> dict:
-    """
-    Get accounts from the database and the API
-    """
-    
-    # Query the database directly using the Account model
-    accounts_query_result = session.query(Account.account_number, Account.account_id).all()
+      """
+      Get accounts from the database and the API
+      """
 
-    # Convert query result to a dictionary for easy lookup
-    accounts_query = {account_number: account_id for account_number, account_id in accounts_query_result}
+      # Query the database directly using the Account model
+      accounts_query_result = session.query(Account.account_number, Account.account_id).all()
 
-    # Get account hashes from API
-    linked_accounts = client.account_linked().json()  # [{'accountNumber': 'XXXX', 'hashValue': 'XXXX'}]
+      # Convert query result to a dictionary for easy lookup
+      accounts_query = {account_number: account_id for account_number, account_id in accounts_query_result}
 
-    # Convert the query result to a dictionary
-    accounts = {}
-    for linked_account in linked_accounts:
-        account_number = int(linked_account['accountNumber'])
-        account_hash = linked_account['hashValue']
-        account_id = accounts_query.get(account_number, None)
-        if account_id is None:
+      # Get account hashes from API
+      try:
+         resp = client.account_linked()
+         resp.raise_for_status()  # Raises an HTTPError if the response was an error
+         linked_accounts = resp.json()
+      except requests.exceptions.HTTPError as e:
+         logger.error(f'HTTP error getting linked accounts: {e}')
+         sys.exit(1)
+      except ValueError as e:  # In case resp.json() fails to parse JSON
+         logger.error(f'Error parsing linked accounts response as JSON: {e}')
+         sys.exit(1)
+
+         
+      # Convert the query result to a dictionary
+      accounts = {}
+      for linked_account in linked_accounts:
+         account_number = int(linked_account['accountNumber'])
+         account_hash = linked_account['hashValue']
+         account_id = accounts_query.get(account_number, None)
+         if account_id is None:
             logger.error(f'Account ID for account number {account_number} not found in the database. Skipping')
             continue
-        accounts[account_number] = {'account_id': account_id, 'account_hash': account_hash}
-    return accounts
+         accounts[account_number] = {'account_id': account_id, 'account_hash': account_hash}
+      return accounts
 
 def get_orders_from_db() -> dict:
    """
@@ -512,10 +550,7 @@ def set_log_file(logger: logging.Logger, filename: str):
 def eastern(dt: datetime) -> datetime:
    """
    Get the number of hours difference between current timezone and America/New_York
-   This will be 4 or 5 depending on daylight savings time
-   Get the current datetime in the local timezone
-   
-   This is a strange way to adjust the time to Eastern time but it is required because the Schwab API
+   This is a strange way to adjust the time to Eastern time but it is required because the schwabdev client
    does a flawed conversion of time format that can't handle datetime objects with timezone info.
    """
    
@@ -563,7 +598,7 @@ if __name__ == '__main__':
    logger.addHandler(handler)
    
    client = schwabdev.Client(os.getenv('appKey'), os.getenv('appSecret'))
-   client.update_tokens_auto()
+   resp = client.update_tokens_auto()
 
    app()
    db.close()
