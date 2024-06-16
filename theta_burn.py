@@ -8,6 +8,8 @@ from sqlalchemy import text, update, select, func
 
 import os
 import sys
+import subprocess
+
 import logging
 from typer import Typer, Option
 from typing import List, Annotated
@@ -195,6 +197,24 @@ def get_orders(account: Annotated[List[int], Option(..., "--account", help="One 
       result = store_orders(account_id, orders)
       logger.info(f'Loaded {result["new_orders"]} new orders, updated {result["updated_orders"]} orders, skipped {result["skipped_orders"]} orders')
 
+@app.command()
+def generate_requirements():
+   """
+   Generate requirements.txt file
+   """
+   # Module to exclude
+   exclude = ['pywin32']
+
+   # Run pip freeze and decode the output
+   pip_freeze_output = subprocess.check_output([sys.executable, '-m', 'pip', 'freeze']).decode()
+
+   # Split the output by lines, filter out the excluded module(s), and join back into a single string
+   filtered_requirements = '\n'.join(line for line in pip_freeze_output.splitlines() if not any(excl in line for excl in exclude))
+
+   # Write the filtered requirements to requirements.txt
+   with open('requirements.txt', 'w') as f:
+      f.write(filtered_requirements)
+      
 def store_orders(account_id: int, orders: list) -> dict:
    """
    Transform and load orders.  
