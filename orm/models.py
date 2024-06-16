@@ -169,6 +169,7 @@ class Order(Base):
     __tablename__ = 'orders'
     account_id = Column(Integer, ForeignKey('accounts.account_id'), primary_key=True)
     entered_time = Column(DateTime)
+    close_time = Column(DateTime)
     order_id = Column(BigInteger, primary_key=True)
     order_type = Column(String(255))
     cancel_time = Column(DateTime)

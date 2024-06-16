@@ -174,6 +174,7 @@ create table positions (
 CREATE TABLE orders (
     account_id INT,
     entered_time DATETIME,
+    close_time DATETIME,
     order_id BIGINT,
     order_type VARCHAR(255),
     cancel_time DATETIME,

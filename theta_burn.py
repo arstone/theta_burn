@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import schwabdev
+import hvac
 
 app = Typer()
 
@@ -163,7 +164,7 @@ def get_orders(account: Annotated[List[int], Option(..., "--account", help="One 
       start_date = eastern(datetime.strptime(start_date, '%Y-%m-%d'))
 
    if end_date is None:
-      end_date = eastern(datetime.now() + timedelta(days=days))
+      end_date = eastern(datetime.now())
    else:
       end_date = eastern(datetime.strptime(end_date, '%Y-%m-%d'))
 
@@ -240,7 +241,10 @@ def store_orders(account_id: int, orders: list) -> dict:
             order_class = order_json.get('orderClass')
       )
       if 'cancelTime' in order_json:
-         order.cancel_time = datetime.strptime(order_json.get('cancelTime'),"%Y-%m-%dT%H:%M:%S%z")
+         order.cancel_time = datetime.strptime(order_json['cancelTime'], "%Y-%m-%dT%H:%M:%S%z")
+
+      if 'closeTime' in order_json:
+         order.close_time = datetime.strptime(order_json['closeTime'], "%Y-%m-%dT%H:%M:%S%z")
 
       session.add(order)
       session.commit()
@@ -567,6 +571,52 @@ def eastern(dt: datetime) -> datetime:
    
    return dt - timedelta(hours=hours_diff)
 
+def get_client_and_sync_tokens() -> schwabdev.Client:
+   """
+   Get the Schwab API client and sync the bearer tokens
+   """
+   # Check if we are using a hashi vault and sync tokens
+   # This allows the theta_burn to run in multiple instances and share the same tokens
+
+   if os.getenv('VAULT_URL') is not None:
+      vault_url = os.getenv('VAULT_URL')
+      vault_token = os.getenv('VAULT_TOKEN')
+      vault_mount = os.getenv('VAULT_MOUNT', 'secret')
+      path = 'theta_burn_tokens_json'
+
+      vault_client = hvac.Client(url=vault_url, token=vault_token)
+      secret_metadata = vault_client.secrets.kv.v2.read_secret_metadata(path=path, mount_point=vault_mount)
+      kv_token_json = vault_client.secrets.kv.v2.read_secret_version(path=path, mount_point=vault_mount, raise_on_deleted_version=False)
+      kv_access_token_issued = kv_token_json['data']['data']['access_token_issued']
+
+      # Check if the tokens.json file exists
+      if os.path.exists('./tokens.json'):
+         with open('./tokens.json', 'r') as f:
+            tokens = json.load(f)
+         file_access_token_issued = tokens['access_token_issued']
+
+      if kv_access_token_issued and file_access_token_issued:
+         # Compare the created time of the tokens.json file and the secret in vault
+         if kv_access_token_issued > file_access_token_issued:
+            # The secret in vault is newer
+            logger.info('The secret in vault is newer than the tokens.json file. Updating the tokens.json file')
+            secret = vault_client.secrets.kv.v2.read_secret_version(path=path, mount_point='kv')
+            # Update the tokens.json file
+            with open('./tokens.json', 'w') as f:
+               json.dump(secret['data']['data'], f)
+
+
+      client = schwabdev.Client(os.getenv('appKey'), os.getenv('appSecret'))
+      client.update_tokens_auto()
+
+      if vault_url is not None:
+         # Update the vault with the new tokens
+         with open('./tokens.json', 'r') as f:
+            tokens = json.load(f)
+         logger.info('Updating the vault with the new tokens')
+         vault_client.secrets.kv.v2.create_or_update_secret(path=path, secret=tokens, mount_point='kv')
+   return client
+
 if __name__ == '__main__':
    
    load_dotenv()
@@ -597,13 +647,8 @@ if __name__ == '__main__':
    # Add handler to logger
    logger.addHandler(handler)
    
-   client = schwabdev.Client(os.getenv('appKey'), os.getenv('appSecret'))
-   client.update_tokens_auto()
+   # Get the Schwab API client
+   client = get_client_and_sync_tokens()
 
    app()
    db.close()
-
-
-
-
-

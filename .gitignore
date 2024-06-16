@@ -1,5 +1,5 @@
 *.json
-.env
+*.env
 __pycache__/
 venv/
 brokers.sql
