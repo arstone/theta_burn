@@ -214,7 +214,7 @@ def generate_requirements():
    # Write the filtered requirements to requirements.txt
    with open('requirements.txt', 'w') as f:
       f.write(filtered_requirements)
-      
+
 def store_orders(account_id: int, orders: list) -> dict:
    """
    Transform and load orders.  
@@ -464,8 +464,7 @@ def load_equity(transaction: Transaction, transferItem: dict, assetType: str):
                                        amount = transferItem['price'],
                                        extended_amount = transferItem['cost'],
                                        quantity = abs(transferItem['amount']),
-                                       symbol = transferItem['instrument']['symbol'],
-                                       description = transferItem['instrument']['description'])
+                                       symbol = transferItem['instrument']['symbol'])
    session.add(transaction_item)
    return
 
