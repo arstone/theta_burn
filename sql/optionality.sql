@@ -213,7 +213,7 @@ CREATE TABLE order_items (
 
 create or replace view transaction_view as (
 select
-   a.account_number, 
+   a.account_id, 
    t.date, 
    date_format(t.date, '%b') month,
    year(t.date) year,
