@@ -248,5 +248,5 @@ where
    ti.transaction in ('BUY', 'SELL', 'INTEREST', 'DIVIDEND')   
 );
 
-
+CREATE INDEX idx_account_symbol_latest ON positions (account_id, symbol, latest);
 
