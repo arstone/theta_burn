@@ -410,8 +410,10 @@ def load_dividend_or_interest(transaction: dict, transferItem: dict, assetType: 
    else:
       transaction_item.transaction = 'DIVIDEND'
 
-   if 'dividend~' in transaction.description.lower():
-      transaction_item.symbo = transaction.description.split('~')[1].strip()
+   for keyword in ('dividend~', 'foreign tax withheld~'):
+      if keyword in transaction.description.lower():
+         transaction_item.symbol = transaction.description.split('~')[1].strip()
+         transaction_item.underlying = transaction_item.symbol
    session.add(transaction_item)
    return
 
