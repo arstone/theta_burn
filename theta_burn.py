@@ -466,7 +466,8 @@ def load_equity(transaction: Transaction, transferItem: dict, assetType: str):
                                        amount = transferItem['price'],
                                        extended_amount = transferItem['cost'],
                                        quantity = abs(transferItem['amount']),
-                                       symbol = transferItem['instrument']['symbol'])
+                                       symbol = transferItem['instrument']['symbol'],
+                                       underlying = transferItem['instrument']['symbol'])
    session.add(transaction_item)
    return
 
