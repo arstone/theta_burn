@@ -35,7 +35,7 @@ def process_transaction_files( import_dir: str = './data/import',
    logger.info(f'Importing transactions from {import_dir}')
 
    i = 0
-   for i, filename in enumerate(os.listdir(import_dir)):
+   for filename in os.listdir(import_dir):
 
       # Skip files that are not JSON files
       if not filename.endswith('.json'):
@@ -46,12 +46,12 @@ def process_transaction_files( import_dir: str = './data/import',
          transactions = json.load(f)
 
       accounts = get_accounts()
-      account_number = transactions[0].get('accountId')
+      account_number = transactions[0].get('accountNumber')
       if account_number is None:
          logger.error(f'Account number not found in the transaction file. Skipping')
          continue
 
-      account_id = accounts[account_number].get('account_id', None)
+      account_id = accounts[int(account_number)].get('account_id', None)
       if account_id is None:
          logger.error(f'Account ID {transactions[0]["accountId"]} not found in the database. Skipping')
          continue
@@ -60,6 +60,7 @@ def process_transaction_files( import_dir: str = './data/import',
 
       # Move the file to the processed directory
       os.rename(os.path.join(import_dir, filename), os.path.join(import_dir, 'processed', filename))
+      i = i + 1
    logger.info(f'Processed {i+1} files')
 
    return
@@ -365,7 +366,7 @@ def store_transactions(account_id: int, transactions: list) -> dict:
       transaction = Transaction(
          transaction_id = transaction_json['activityId'],
          account_id = account_id,
-         date = datetime.strptime(transaction_json['time'], "%Y-%m-%dT%H:%M:%S%z"),
+         date = datetime.strptime(transaction_json['tradeDate'], "%Y-%m-%dT%H:%M:%S%z"),
          type = transaction_json['type'],
          status = transaction_json['status'],
          amount = transaction_json['netAmount'],
@@ -436,6 +437,9 @@ def load_fee(transaction: Transaction, transferItem: dict, assetType: str):
 
 def load_option(transaction: Transaction, transferItem: dict, assetType: str):
    if assetType != 'OPTION':
+      return
+   
+   if transferItem['instrument'].get('status') == 'DISABLED':
       return
 
    transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
