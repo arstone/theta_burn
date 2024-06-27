@@ -7,9 +7,12 @@
 select 
     a.year, 
     a.account, 
+    (market.total_days - market.completed_days) market_days_left,
     count(distinct a.date) as days_with_trade,
-    round(count(distinct a.date) / market.completed_days, 3) * 100 as ytd_ratio,
-    round(count(distinct a.date) / market.total_days, 3) * 100 as total_year_ratio
+    concat(round((count(distinct a.date) / market.completed_days) * 100 , 1),'%') as trading_ratio_ytd,
+    concat(round((count(distinct a.date) / market.total_days) * 100, 1),'%') as trading_ratio,
+    concat(75, '%') target_trading_ratio,
+    ceil((market.total_days * .75)) target_trading_days
 from (
     select 
         year(date) as year,
@@ -40,4 +43,4 @@ join (
         year(date)
 ) market on (market.year = a.year)
 group by 
-    a.year, a.account
+    a.year, a.account, market_days_left
