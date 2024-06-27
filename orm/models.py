@@ -141,7 +141,8 @@ class Calendar(Base):
     is_holiday = Column(Boolean)
     is_current_year = Column(Boolean)
     is_current_month = Column(Boolean)
-
+    is_market_open = Column(Boolean)
+    
 class Position(Base):
     __tablename__ = 'positions'
     position_id = Column(BigInteger, primary_key=True, autoincrement=True)

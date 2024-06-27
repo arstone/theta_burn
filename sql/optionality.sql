@@ -144,7 +144,8 @@ create table calendar (
     is_weekday BOOLEAN,
     is_holiday BOOLEAN,
     is_current_year BOOLEAN AS (YEAR(date) = YEAR(CURDATE())),
-    is_current_month BOOLEAN AS (YEAR(date) = YEAR(CURDATE()) AND MONTH(date) = MONTH(CURDATE()))
+    is_current_month BOOLEAN AS (YEAR(date) = YEAR(CURDATE()) AND MONTH(date) = MONTH(CURDATE()),
+    is_market_open BOOLEAN)
 );
 
 
