@@ -3,7 +3,7 @@
 -- Includes ratio of days traded to total market days for the current year
 
 -- These ratio are important for maintaining professional trader status.
--- IRS requires a trade on at least 75% of the open market days
+-- IRS requires a buy or sell transaction on at least 75% of the open market days
 select 
     a.year, 
     a.account, 
@@ -27,6 +27,7 @@ from (
         year(date) = year(now())
         and t.type = 'TRADE'
         and transaction in ('SELL', 'BUY')
+        and a.type = 'TAXABLE'
     group by 
         year(date), date, position_id, account
 ) a
