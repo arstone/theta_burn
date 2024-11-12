@@ -7,18 +7,24 @@
 select 
     a.year, 
     a.account, 
-    (market.total_days - market.completed_days) market_days_left,
+    market.days_completed market_days_completed,
+    (market.days_total - market.days_completed) market_days_left,
     count(distinct a.date) as days_with_trade,
-    concat(round((count(distinct a.date) / market.completed_days) * 100 , 1),'%') as trading_ratio_ytd,
-    concat(round((count(distinct a.date) / market.total_days) * 100, 1),'%') as trading_ratio,
+    concat(round((count(distinct a.date) / market.days_completed) * 100 , 1),'%') as trading_ratio_ytd,
+    concat(round((count(distinct a.date) / market.days_total) * 100, 1),'%') as trading_ratio,
+    sum(a.transactions) transactions,
+    round(sum(a.transactions) / market.days_completed,2) avg_daily_transactions,
+    max(date) last_trade,
     concat(75, '%') target_trading_ratio,
-    ceil((market.total_days * .75)) target_trading_days
+    ceil((market.days_total * .75)) target_trading_days,
+    (market.days_total - market.days_completed) - (ceil((market.days_total * .75)) - count(distinct a.date)) as days_allowed_with_no_trade
 from (
     select 
         year(date) as year,
         date,
         position_id, 
-        a.name as account
+        a.name as account,
+        count(*) transactions
     from 
         transactions t 
         join transaction_items ti using (transaction_id)
@@ -34,8 +40,8 @@ from (
 join (
     select 
         year(date) as year,
-        count(*) as total_days,
-        sum(if(date <= now(), 1, 0)) as completed_days
+        count(*) as days_total,
+        sum(if(date <= now(), 1, 0)) as days_completed
     from 
         calendar 
     where 
@@ -44,4 +50,4 @@ join (
         year(date)
 ) market on (market.year = a.year)
 group by 
-    a.year, a.account, market_days_left
+    a.year, a.account, market_days_left,market_days_completed
