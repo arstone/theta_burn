@@ -4,9 +4,9 @@
 
 -- These ratio are important for maintaining professional trader status.
 -- IRS requires a buy or sell transaction on at least 75% of the open market days
-select 
-    a.year, 
-    a.account, 
+select
+    a.year,
+    a.account,
     market.days_completed market_days_completed,
     (market.days_total - market.days_completed) market_days_left,
     count(distinct a.date) as days_with_trade,
@@ -19,35 +19,36 @@ select
     ceil((market.days_total * .75)) target_trading_days,
     (market.days_total - market.days_completed) - (ceil((market.days_total * .75)) - count(distinct a.date)) as days_allowed_with_no_trade
 from (
-    select 
+    select
         year(date) as year,
-        date,
-        position_id, 
-        a.name as account,
-        count(*) transactions
-    from 
-        transactions t 
+        date, 
+        symbol, 
+        transaction,
+        1 transactions,
+        a.name as account
+    from
+        transactions t
         join transaction_items ti using (transaction_id)
         join accounts a using (account_id)
-    where 
+    where
         year(date) = year(now())
         and t.type = 'TRADE'
         and transaction in ('SELL', 'BUY')
         and a.type = 'TAXABLE'
-    group by 
-        year(date), date, position_id, account
+    group by
+        1,2,3,4,5
 ) a
 join (
-    select 
+    select
         year(date) as year,
         count(*) as days_total,
         sum(if(date <= now(), 1, 0)) as days_completed
-    from 
-        calendar 
-    where 
+    from
+        calendar
+    where
         is_market_open = true
-    group by 
+    group by
         year(date)
 ) market on (market.year = a.year)
-group by 
-    a.year, a.account, market_days_left,market_days_completed
+group by
+    a.year, a.account, market_days_left,market_days_completed    
