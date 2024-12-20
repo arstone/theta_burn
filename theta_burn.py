@@ -382,6 +382,7 @@ def store_transactions(account_id: int, transactions: list) -> dict:
          load_dividend_or_interest(transaction, transferItem, assetType)
          load_fee(transaction, transferItem, assetType)
          load_option(transaction, transferItem, assetType)
+         load_future(transaction, transferItem, assetType)
          load_equity(transaction, transferItem, assetType)
          load_fixed_income(transaction, transferItem, assetType)
    session.commit()
@@ -438,10 +439,7 @@ def load_fee(transaction: Transaction, transferItem: dict, assetType: str):
 def load_option(transaction: Transaction, transferItem: dict, assetType: str):
    if assetType != 'OPTION':
       return
-   
-   if transferItem['instrument'].get('status') == 'DISABLED':
-      return
-
+  
    transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
                                        asset_type = transferItem['instrument']['putCall'],
                                        transaction = 'BUY' if transferItem['amount'] > 0 else 'SELL',
@@ -455,13 +453,41 @@ def load_option(transaction: Transaction, transferItem: dict, assetType: str):
                                        position_effect = transferItem.get('positionEffect'))
 
    if 'expirationDate' in transferItem['instrument']:
-      transaction_item.expiration_date = datetime.strptime(transferItem['instrument']['expirationDate'],"%Y-%m-%dT%H:%M:%S%z")
+      if transferItem['instrument'].get('status') == 'DISABLED':
+         # parse the expiration date out of the symbol
+         # Symbol looks like NFLX_041924P550
+         symbol_parts = transferItem['instrument']['symbol'].split('_')
+         date_str = symbol_parts[1][:6]  # Get the first 6 characters after the underscore
+         transaction_item.expiration_date = datetime.strptime(date_str, "%m%d%y")
+      else:
+         transaction_item.expiration_date = datetime.strptime(transferItem['instrument']['expirationDate'],"%Y-%m-%dT%H:%M:%S%z")
 
    session.add(transaction_item)
    return
 
+def load_future(transaction: Transaction, transferItem: dict, assetType: str):
+   if assetType != 'FUTURE':
+      return
+  
+   transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
+                                       asset_type = transferItem['instrument']['assetType'],
+                                       transaction = 'BUY' if transferItem['amount'] > 0 else 'SELL',
+                                       amount = transferItem['price'],
+                                       extended_amount = transferItem['cost'],
+                                       quantity = abs(transferItem['amount']),
+                                       symbol = transferItem['instrument']['symbol'],
+                                       description = transferItem['instrument']['description'])
+
+   if 'expirationDate' in transferItem['instrument']:
+         transaction_item.expiration_date = datetime.strptime(transferItem['instrument']['expirationDate'],"%Y-%m-%dT%H:%M:%S%z")
+
+   session.add(transaction_item)
+   return
+
+
+
 def load_equity(transaction: Transaction, transferItem: dict, assetType: str):
-   if assetType != 'EQUITY':
+   if assetType not in ('EQUITY', 'COLLECTIVE_INVESTMENT'):
       return
 
    transaction_item = TransactionItem(transaction_id = transaction.transaction_id,
