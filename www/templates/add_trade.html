@@ -1,0 +1,78 @@
+<!-- filepath: /c:/Users/aston/src/theta_burn/templates/add_trade.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Trade</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container">
+        <h1 class="mt-5">Add Trade</h1>
+        <form method="POST">
+            <div class="form-group">
+                <label for="user_id">User ID</label>
+                <input type="number" class="form-control" id="user_id" name="user_id" required>
+            </div>
+            <div class="form-group">
+                <label for="account_id">Account ID</label>
+                <input type="number" class="form-control" id="account_id" name="account_id" required>
+            </div>
+            <div class="form-group">
+                <label for="open_date">Open Date</label>
+                <input type="date" class="form-control" id="open_date" name="open_date" required>
+            </div>
+            <div class="form-group">
+                <label for="close_date">Close Date</label>
+                <input type="date" class="form-control" id="close_date" name="close_date" required>
+            </div>
+            <div class="form-group">
+                <label for="type">Type</label>
+                <input type="text" class="form-control" id="type" name="type" required>
+            </div>
+            <div class="form-group">
+                <label for="status">Status</label>
+                <input type="text" class="form-control" id="status" name="status" required>
+            </div>
+            <div class="form-group">
+                <label for="amount">Amount</label>
+                <input type="number" step="0.01" class="form-control" id="amount" name="amount" required>
+            </div>
+            <div class="form-group">
+                <label for="profit_target">Profit Target</label>
+                <input type="number" step="0.01" class="form-control" id="profit_target" name="profit_target" required>
+            </div>
+            <div class="form-group">
+                <label for="stop_loss_target">Stop Loss Target</label>
+                <input type="number" step="0.01" class="form-control" id="stop_loss_target" name="stop_loss_target" required>
+            </div>
+            <div class="form-group">
+                <label for="starting_margin">Starting Margin</label>
+                <input type="number" step="0.01" class="form-control" id="starting_margin" name="starting_margin" required>
+            </div>
+            <div class="form-group">
+                <label for="ending_margin">Ending Margin</label>
+                <input type="number" step="0.01" class="form-control" id="ending_margin" name="ending_margin" required>
+            </div>
+            <div class="form-group">
+                <label for="max_margin">Max Margin</label>
+                <input type="number" step="0.01" class="form-control" id="max_margin" name="max_margin" required>
+            </div>
+            <div class="form-group">
+                <label for="adjustments">Adjustments</label>
+                <input type="number" class="form-control" id="adjustments" name="adjustments">
+            </div>
+            <div class="form-group">
+                <label for="comment">Comment</label>
+                <textarea class="form-control" id="comment" name="comment"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="description">Description</label>
+                <input type="text" class="form-control" id="description" name="description" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Add Trade</button>
+        </form>
+    </div>
+</body>
+</html>

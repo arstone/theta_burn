@@ -1,0 +1,59 @@
+body {
+    font-size: 14px;
+}
+
+.table {
+    font-size: 12px;
+}
+
+.table th, .table td {
+    vertical-align: middle;
+    margin-bottom: 20px;
+}
+
+.loading-spinner {
+    display: none;
+    text-align: center;
+    margin-top: 20px;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+
+.modal-header.error {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.modal-body.error {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.modal-footer.error {
+    background-color: #f8d7da;
+}
+
+/* Fix for search box and entries dropdown overlap */
+.dataTables_wrapper .dataTables_filter {
+    float: right;
+    text-align: right;
+}
+
+/* Add padding to the bottom to prevent cut-off */
+.dataTables_wrapper {
+    padding-bottom: 1em;
+}
+
+/* Add margin to the top to prevent overlap */
+.dataTables_wrapper .dataTables_info {
+    margin-top: 0.5em;
+}
