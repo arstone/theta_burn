@@ -4,69 +4,51 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'lib')))
 
 
-
+from sqlalchemy import asc, desc, or_, func
 from flask import Flask, render_template, request, redirect, url_for, jsonify, current_app as app
-from orm.models import Trade, TransactionView
+from orm.models import Trade, TransactionView, Account, Position
 from orm.database import Database
 
-# Initialize the Database instance
-db_instance = Database()
-
 app = Flask(__name__)
+
 db_instance = Database()
 
 
 @app.route('/')
 def index():
-    session = db_instance.get_session()
+    session = db_instance.get_session(singleton=False)
     trades = session.query(Trade).all()
     return render_template('index.html', trades=trades)
 
-@app.route('/add_trade', methods=['GET', 'POST'])
-def add_trade():
-    if request.method == 'POST':
-        session = db_instance.get_session()
-        user_id = request.form['user_id']
-        account_id = request.form['account_id']
-        open_date = request.form['open_date']
-        close_date = request.form['close_date']
-        type = request.form['type']
-        status = request.form['status']
-        amount = request.form['amount']
-        profit_target = request.form['profit_target']
-        stop_loss_target = request.form['stop_loss_target']
-        starting_margin = request.form['starting_margin']
-        ending_margin = request.form['ending_margin']
-        max_margin = request.form['max_margin']
-        adjustments = request.form['adjustments']
-        comment = request.form['comment']
-        description = request.form['description']
 
-        new_trade = Trade(
-            user_id=user_id,
-            account_id=account_id,
-            open_date=open_date,
-            close_date=close_date,
-            type=type,
-            status=status,
-            amount=amount,
-            profit_target=profit_target,
-            stop_loss_target=stop_loss_target,
-            starting_margin=starting_margin,
-            ending_margin=ending_margin,
-            max_margin=max_margin,
-            adjustments=adjustments,
-            comment=comment,
-            description=description
-        )
-        session.add(new_trade)
-        session.commit()
-        return redirect(url_for('index'))
-    return render_template('add_trade.html')
+@app.route('/api/add_trade', methods=['POST'])
+def api_add_trade():
+    session = db_instance.get_session(singleton=False)
+    data = request.form.to_dict()
+    trade = Trade(
+        user_id=data['user_id'],
+        account_id=data['account_id'],
+        open_date=data['open_date'],
+        close_date=data['close_date'],
+        description=data['description'],
+        type=data['type'],
+        status=data['status'],
+        amount=data['amount'],
+        profit_target=data['profit_target'],
+        stop_loss_target=data['stop_loss_target'],
+        starting_margin=data['starting_margin'],
+        ending_margin=data['ending_margin'],
+        max_margin=data['max_margin'],
+        adjustments=data.get('adjustments'),
+        comment=data.get('comment')
+    )
+    session.add(trade)
+    session.commit()
+    return jsonify({'success': True})
 
 @app.route('/api/trades', methods=['GET'])
 def api_trades():
-    session = db_instance.get_session()
+    session = db_instance.get_session(singleton=False)
     
     # Get parameters from DataTables request
     draw = request.args.get('draw', type=int)
@@ -114,22 +96,51 @@ def api_trades():
         'data': data
     })
 
+@app.route('/api/transaction_columns', methods=['GET'])
+def api_transaction_columns():
+    columns = [
+        {"data": "select", "orderable": False, "className": "select-checkbox"}
+    ]
+    for column in TransactionView.__table__.columns:
+        columns.append({"data": column.name})
+    return jsonify(columns)
+
 @app.route('/api/unassigned_transactions', methods=['GET'])
 def api_unassigned_transactions():
-    session = db_instance.get_session()
+    session = db_instance.get_session(singleton=False)
     
     # Get parameters from DataTables request
     draw = request.args.get('draw', type=int)
     start = request.args.get('start', type=int)
     length = request.args.get('length', type=int)
     search_value = request.args.get('search[value]', type=str)
+    order_column = request.args.get('order[0][column]', type=int)
+    order_dir = request.args.get('order[0][dir]', type=str)
     
     # Base query
     query = session.query(TransactionView).filter_by(trade_id=None)
     
     # Apply search filter
     if search_value:
-        query = query.filter(TransactionView.description.like(f'%{search_value}%'))
+        search_filter = or_(
+            TransactionView.description.like(f'%{search_value}%'),
+            TransactionView.symbol.like(f'%{search_value}%'),
+            TransactionView.underlying.like(f'%{search_value}%'),
+            TransactionView.transaction_id.like(f'%{search_value}%'),
+            TransactionView.trade_id.like(f'%{search_value}%'),
+            TransactionView.order_id.like(f'%{search_value}%')
+        )
+        query = query.filter(search_filter)    
+
+    # Apply sorting
+    if order_column is not None and order_dir is not None:
+        column_name = request.args.get(f'columns[{order_column}][data]')
+        if column_name != 'select':  # Skip the 'select' column
+            column_attr = getattr(TransactionView, column_name)
+            if order_dir == 'asc':
+                query = query.order_by(asc(column_attr))
+            else:
+                query = query.order_by(desc(column_attr))
     
     # Get total records count
     total_records = query.count()
@@ -138,29 +149,56 @@ def api_unassigned_transactions():
     transactions = query.offset(start).limit(length).all()
     
     # Prepare response
-    data = [{
-        'select': f'<input type="checkbox" value="{t.transaction_id}">',  # Checkbox HTML
-        'transaction_id': t.transaction_id,
-        'account_id': t.account_id,
-        'date': t.date,
-        'month': t.month,
-        'year': t.year,
-        'position_id': t.position_id,
-        'trade_id': t.trade_id,
-        'order_id': t.order_id,
-        'description': t.description,
-        'quantity': t.quantity,
-        'symbol': t.symbol,
-        'underlying': t.underlying,
-        'amount': t.amount,
-        'commission': t.commission,
-        'fees': t.fees,
-        'transaction': t.transaction,
-        'asset_type': t.asset_type,
-        'expiration_date': t.expiration_date,
-        'strike_price': t.strike_price,
-        'extended_amount': t.extended_amount,
-    } for t in transactions]
+    data = [t.to_dict() for t in transactions]
+    for item in data:
+        item['select'] = f'<input type="checkbox" value="{item["transaction_id"]}">'  # Add checkbox HTML
+    
+    # Calculate total extended amount
+    total_extended_amount = query.with_entities(func.sum(TransactionView.extended_amount)).scalar() or 0
+    
+    return jsonify({
+        'draw': draw,
+        'recordsTotal': total_records,
+        'recordsFiltered': total_records,
+        'data': data,
+        'totalExtendedAmount': total_extended_amount})
+
+@app.route('/api/assign_transactions/<int:trade_id>', methods=['POST'])
+def api_assign_transactions(trade_id):
+    session = db_instance.get_session(singleton=False)
+    data = request.json
+    transaction_ids = data.get('transaction_ids', [])
+    for transaction_id in transaction_ids:
+        transaction = session.query(TransactionView).get(transaction_id)
+        transaction.trade_id = trade_id
+    session.commit()
+    return '', 204
+
+@app.route('/api/accounts', methods=['GET'])
+def api_accounts():
+    session = db_instance.get_session(singleton=False)
+    accounts = session.query(Account).all()
+    data = [{'account_id': account.account_id, 'name': account.name} for account in accounts]
+    return jsonify(data)
+
+
+@app.route('/api/positions', methods=['GET'])
+def api_positions():
+    # Get parameters from DataTables request
+    draw = request.args.get('draw', type=int)
+    start = request.args.get('start', type=int)
+    length = request.args.get('length', type=int)
+    search_value = request.args.get('search[value]', type=str)
+    order_column = request.args.get('order[0][column]', type=int)
+    order_dir = request.args.get('order[0][dir]', type=str)
+
+    session = db_instance.get_session(singleton=False)
+    query = session.query(Position).filter_by(latest='Y')
+    total_records = query.count()
+
+    # Apply pagination
+    positions = query.offset(start).limit(length).all()
+    data = [p.to_dict() for p in positions]
 
     return jsonify({
         'draw': draw,
@@ -169,16 +207,12 @@ def api_unassigned_transactions():
         'data': data
     })
 
-@app.route('/api/assign_transactions/<int:trade_id>', methods=['POST'])
-def api_assign_transactions(trade_id):
-    session = db_instance.get_session()
-    data = request.json
-    transaction_ids = data.get('transaction_ids', [])
-    for transaction_id in transaction_ids:
-        transaction = session.query(TransactionView).get(transaction_id)
-        transaction.trade_id = trade_id
-    session.commit()
-    return '', 204
+@app.route('/api/position_columns', methods=['GET'])
+def api_position_columns():
+    columns = []
+    for column in Position.__table__.columns:
+        columns.append({"data": column.name})
+    return jsonify(columns)
 
 if __name__ == '__main__':
     try:

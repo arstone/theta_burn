@@ -3,10 +3,10 @@ from sqlalchemy.orm import sessionmaker, scoped_session
 import os
 from .models import Base
 from dotenv import load_dotenv
+from contextlib import contextmanager
 
 class Database:
     def __init__(self):
-
         # Load environment variables from .env file
         load_dotenv()
 
@@ -17,20 +17,38 @@ class Database:
 
         self.engine = create_engine(f'mysql+mysqlconnector://{db_user}:{db_password}@{db_host}/{db_name}')
         self.session_factory = sessionmaker(bind=self.engine)
-        self._session = None
+        self.Session = scoped_session(self.session_factory)
+        self._singleton_session = None
 
-    def get_session(self):
-        if self._session is None:
-            self.Session = scoped_session(self.session_factory)
-            self._session = self.Session()
-        return self._session
+    def get_session(self, singleton=True):
+        if singleton:
+            if self._singleton_session is None:
+                self._singleton_session = self.Session()
+            return self._singleton_session
+        else:
+            return self.Session()
+
+    @contextmanager
+    def session_scope(self):
+        """Provide a transactional scope around a series of operations."""
+        session = self.get_session()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def get_engine(self):
         return self.engine
     
     def close(self):
-        if self._session is not None:
-            self._session.close()
-        if hasattr(self, 'Session'):
-            self.Session.remove()
+        if self._singleton_session is not None:
+            self._singleton_session.close()
+        self.Session.remove()
         self.engine.dispose()
+
+# Example usage
+db_instance = Database()

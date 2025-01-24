@@ -1,17 +1,24 @@
-from sqlalchemy import create_engine, Column, Integer, String, DECIMAL, Date, DateTime, ForeignKey, Boolean, Text, CHAR, BigInteger
+from sqlalchemy import create_engine, Column, Integer, String, DECIMAL, Date, DateTime, ForeignKey
+from sqlalchemy import Boolean, Text, CHAR, BigInteger
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
+# Create a base class
 Base = declarative_base()
 
+class BaseModel(Base):
+    __abstract__ = True  # This ensures that SQLAlchemy does not create a table for this class
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 
-class Broker(Base):
+class Broker(BaseModel):
     __tablename__ = 'brokers'
     broker_id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
 
-class User(Base):
+class User(BaseModel):
     __tablename__ = 'users'
     user_id = Column(Integer, primary_key=True, autoincrement=True)
     first_name = Column(String(255), nullable=False)
@@ -25,7 +32,7 @@ class User(Base):
     zip = Column(String(255), nullable=False)
     country = Column(String(255), nullable=False)
 
-class Account(Base):
+class Account(BaseModel):
     __tablename__ = 'accounts'
     account_id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
@@ -37,7 +44,7 @@ class Account(Base):
     user = relationship("User")
     broker = relationship("Broker")
 
-class AccountBalance(Base):
+class AccountBalance(BaseModel):
     __tablename__ = 'account_balances'
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(Integer, ForeignKey('accounts.account_id'), nullable=False)
@@ -45,7 +52,7 @@ class AccountBalance(Base):
     date = Column(Date)
     account = relationship("Account", backref="account_balances")
 
-class Strategy(Base):
+class Strategy(BaseModel):
     __tablename__ = 'strategies'
     strategy_id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
@@ -54,7 +61,7 @@ class Strategy(Base):
     author = Column(String(255), nullable=False)
     user = relationship("User")
 
-class Trade(Base):
+class Trade(BaseModel):
     __tablename__ = 'trades'
     trade_id = Column(BigInteger, primary_key=True, autoincrement=True)
     user_trade_id = Column(Integer, nullable=False, default=0)
@@ -80,7 +87,7 @@ class Trade(Base):
     user = relationship("User")
     account = relationship("Account")
 
-class Transaction(Base):
+class Transaction(BaseModel):
     __tablename__ = 'transactions'
     transaction_id = Column(BigInteger, primary_key=True)
     account_id = Column(Integer, ForeignKey('accounts.account_id'), nullable=False, primary_key=True)
@@ -94,7 +101,7 @@ class Transaction(Base):
     description = Column(String(255))
     account = relationship("Account")
 
-class TransactionItem(Base):
+class TransactionItem(BaseModel):
     __tablename__ = 'transaction_items'
     item_id = Column(BigInteger, primary_key=True, autoincrement=True)
     transaction_id = Column(BigInteger, ForeignKey('transactions.transaction_id'))
@@ -111,7 +118,7 @@ class TransactionItem(Base):
     position_effect = Column(String(255))
     transaction_rel = relationship("Transaction")
 
-class Quote(Base):
+class Quote(BaseModel):
     __tablename__ = 'quotes'
     quote_id = Column(BigInteger, primary_key=True, autoincrement=True)
     symbol = Column(String(255), nullable=False)
@@ -128,7 +135,7 @@ class Quote(Base):
     vega = Column(DECIMAL(10,2), nullable=False)
     rho = Column(DECIMAL(10,2), nullable=False)
 
-class Calendar(Base):
+class Calendar(BaseModel):
     __tablename__ = 'calendar'
     date = Column(Date, primary_key=True)
     year = Column(Integer)
@@ -146,7 +153,7 @@ class Calendar(Base):
     is_current_month = Column(Boolean)
     is_market_open = Column(Boolean)
     
-class Position(Base):
+class Position(BaseModel):
     __tablename__ = 'positions'
     position_id = Column(BigInteger, primary_key=True, autoincrement=True)
     account_id = Column(Integer, ForeignKey('accounts.account_id'), nullable=False)
@@ -169,7 +176,7 @@ class Position(Base):
     latest = Column(CHAR(1), default='N')
     account = relationship("Account")
 
-class Order(Base):
+class Order(BaseModel):
     __tablename__ = 'orders'
     account_id = Column(Integer, ForeignKey('accounts.account_id'), primary_key=True)
     entered_time = Column(DateTime)
@@ -188,7 +195,7 @@ class Order(Base):
     order_class = Column(String(255))
     account = relationship("Account")
 
-class OrderItem(Base):
+class OrderItem(BaseModel):
     __tablename__ = 'order_items'
     account_id = Column(Integer, primary_key=True)
     order_id = Column(BigInteger, ForeignKey('orders.order_id'), primary_key=True)
@@ -207,14 +214,14 @@ class OrderItem(Base):
     order_item_id = Column(Integer, primary_key=True)
     order = relationship("Order", backref="order_items")
 
-class Security(Base):
+class Security(BaseModel):
     __tablename__ = 'securities'
     symbol = Column(String(255), primary_key=True)
     description = Column(String(255), nullable=False)
     exchange = Column(String(255), nullable=False)
     asset_type = Column(String(255), nullable=False)
 
-class TransactionView(Base):
+class TransactionView(BaseModel):
     __tablename__ = 'transaction_view'
     transaction_id = Column(BigInteger, primary_key=True)
     account_id = Column(Integer)
@@ -236,3 +243,7 @@ class TransactionView(Base):
     expiration_date = Column(Date)
     strike_price = Column(DECIMAL(10, 2))
     extended_amount = Column(DECIMAL(10, 2))
+                             
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+     

@@ -80,7 +80,14 @@
                 "serverSide": true,
                 "ajax": {
                     "url": "/api/unassigned_transactions",
-                    "type": "GET"
+                    "type": "GET",
+                    "dataSrc": function(json) {
+                        // Ensure totalExtendedAmount is a number
+                        var totalExtendedAmount = parseFloat(json.totalExtendedAmount) || 0;
+                        // Update the total extended amount
+                        $('#total-extended-amount').html('Total Extended Amount: $' + totalExtendedAmount.toFixed(2));
+                        return json.data;
+                    }
                 },
                 "columns": [
                     { "data": "select", "orderable": false, "className": "select-checkbox" },
@@ -109,15 +116,36 @@
                     "selector": "td:first-child input[type='checkbox']"
                 },
                 "order": [[1, 'asc']]
-            });
-        
+            });               
+
+           
             // Handle Assign button click
             $('#trades-table tbody').on('click', '.assign-btn', function() {
                 var data = $('#trades-table').DataTable().row($(this).parents('tr')).data();
                 assignTransactions(data.trade_id);
             });
+
+           // Fetch accounts for the dropdown
+           $.getJSON('/api/accounts', function(accounts) {
+                var accountSelect = $('#account_id');
+                accounts.forEach(function(account) {
+                    accountSelect.append(new Option(account.name, account.account_id));
+                });
+            }).fail(function(jqxhr, textStatus, error) {
+                console.error("Request Failed: " + textStatus + ", " + error); // Debugging line
+            });
+            
+            // Handle Add Trade form submission
+            $('#addTradeForm').on('submit', function(event) {
+                event.preventDefault();
+                var formData = $(this).serialize();
+                $.post('/api/add_trade', formData, function(response) {
+                    $('#addTradeModal').modal('hide');
+                    $('#trades-table').DataTable().ajax.reload();
+                });
+            });
         });
-        
+
         async function assignTransactions(tradeId) {
             const checkboxes = document.querySelectorAll('#unassigned-transactions-table input[type="checkbox"]:checked');
             const transactionIds = Array.from(checkboxes).map(checkbox => checkbox.value);
@@ -147,9 +175,9 @@
     </script>
 </head>
 <body>
-    <div class="container">
+    <div class="container-fluid"
         <h1 class="mt-5">Trades</h1>
-        <a href="{{ url_for('add_trade') }}" class="btn btn-primary mb-3">Add Trade</a>
+        <button class="btn btn-primary mb-3" data-bs-toggle="modal" data-bs-target="#addTradeModal">Add Trade</button>
         <table id="trades-table" class="display" style="width:100%">
             <thead>
                 <tr>
@@ -203,6 +231,11 @@
                 <span class="sr-only">Loading...</span>
             </div>
         </div>
+        <div class="table-controls">
+            <div id="total-extended-amount" style="margin-right: 20px; display: inline-block;">
+                Total Extended Amount: $0.00
+            </div>
+        </div>
         <table id="unassigned-transactions-table" class="display" style="width:100%">
             <thead>
                 <tr>
@@ -232,6 +265,83 @@
                 <!-- Unassigned transactions will be loaded here by DataTables -->
             </tbody>
         </table>
+    </div>
+
+    <!-- Add Trade Modal -->
+    <div class="modal fade" id="addTradeModal" tabindex="-1" aria-labelledby="addTradeModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addTradeModalLabel">Add Trade</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addTradeForm">
+                        <input type="hidden" name="user_id" value="1">
+                        <div class="mb-3">
+                            <label for="account_id" class="form-label">Account ID</label>
+                            <select class="form-select" id="account_id" name="account_id" required></select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="open_date" class="form-label">Open Date</label>
+                            <input type="date" class="form-control" id="open_date" name="open_date" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="close_date" class="form-label">Close Date</label>
+                            <input type="date" class="form-control" id="close_date" name="close_date" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="description" class="form-label">Description</label>
+                            <input type="text" class="form-control" id="description" name="description" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="type" class="form-label">Type</label>
+                            <input type="text" class="form-control" id="type" name="type" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="status" class="form-label">Status</label>
+                            <select class="form-select" id="status" name="status" required>
+                                <option value="Open">Open</option>
+                                <option value="Closed">Closed</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="amount" class="form-label">Amount</label>
+                            <input type="number" class="form-control" id="amount" name="amount" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="profit_target" class="form-label">Profit Target</label>
+                            <input type="number" class="form-control" id="profit_target" name="profit_target" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="stop_loss_target" class="form-label">Stop Loss Target</label>
+                            <input type="number" class="form-control" id="stop_loss_target" name="stop_loss_target" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="starting_margin" class="form-label">Starting Margin</label>
+                            <input type="number" class="form-control" id="starting_margin" name="starting_margin" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="ending_margin" class="form-label">Ending Margin</label>
+                            <input type="number" class="form-control" id="ending_margin" name="ending_margin" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="max_margin" class="form-label">Max Margin</label>
+                            <input type="number" class="form-control" id="max_margin" name="max_margin" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="adjustments" class="form-label">Adjustments</label>
+                            <input type="text" class="form-control" id="adjustments" name="adjustments">
+                        </div>
+                        <div class="mb-3">
+                            <label for="comment" class="form-label">Comment</label>
+                            <input type="text" class="form-control" id="comment" name="comment">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add Trade</button>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Error Modal -->

@@ -42,18 +42,30 @@ body {
     background-color: #f8d7da;
 }
 
-/* Fix for search box and entries dropdown overlap */
 .dataTables_wrapper .dataTables_filter {
     float: right;
-    text-align: right;
+    /* Remove text-align: right; or set it to left if you prefer */
+    text-align: left; 
 }
 
 /* Add padding to the bottom to prevent cut-off */
 .dataTables_wrapper {
     padding-bottom: 1em;
+    text-align: left; /* Ensure the wrapper is left-aligned */
 }
 
 /* Add margin to the top to prevent overlap */
 .dataTables_wrapper .dataTables_info {
     margin-top: 0.5em;
+}
+
+#total-extended-amount {
+    font-weight: bold;
+    margin-right: 20px;
+    display: inline-block;
+}
+
+/* Ensure the DataTable itself is left-aligned */
+.dataTables_wrapper .dataTables_scroll {
+    text-align: left;
 }
