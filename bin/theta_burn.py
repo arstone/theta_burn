@@ -789,6 +789,12 @@ def get_client_and_sync_tokens() -> schwabdev.Client:
                   # Convert file_access_token_issued to a datetime object
                   file_access_token_issued = datetime.fromisoformat(file_access_token_issued)
 
+                  # Ensure both datetime objects are aware
+                  if kv_access_token_issued.tzinfo is None:
+                     kv_access_token_issued = kv_access_token_issued.replace(tzinfo=pytz.UTC)
+                  if file_access_token_issued.tzinfo is None:
+                     file_access_token_issued = file_access_token_issued.replace(tzinfo=pytz.UTC)
+
                   if kv_access_token_issued and file_access_token_issued:
                      # Compare the created time of the tokens.json file and the secret in vault
                      if kv_access_token_issued > file_access_token_issued:
