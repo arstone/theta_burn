@@ -1,5 +1,7 @@
 import sys
 import os
+import traceback
+
 # Add the lib directory to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'lib')))
 
@@ -745,68 +747,75 @@ def eastern(dt: datetime) -> datetime:
    return dt - timedelta(hours=hours_diff)
 
 def get_client_and_sync_tokens() -> schwabdev.Client:
-   """
-   Get the Schwab API client and sync the bearer tokens
-   """
-   # Check if we are using a hashi vault and sync tokens
-   # This allows the theta_burn to run in multiple instances and share the same tokens
+    """
+    Get the Schwab API client and sync the bearer tokens
+    """
+    # Check if we are using a hashi vault and sync tokens
+    # This allows the theta_burn to run in multiple instances and share the same tokens
 
-   if os.getenv('VAULT_URL') is not None:
-      vault_url = os.getenv('VAULT_URL')
-      vault_token = os.getenv('VAULT_TOKEN')
-      vault_mount = os.getenv('VAULT_MOUNT', 'secret')
-      path = 'theta_burn_tokens_json'
+    if os.getenv('VAULT_URL') is not None:
+        vault_url = os.getenv('VAULT_URL')
+        vault_token = os.getenv('VAULT_TOKEN')
+        vault_mount = os.getenv('VAULT_MOUNT', 'secret')
+        path = 'theta_burn_tokens_json'
 
-      vault_client = hvac.Client(url=vault_url, token=vault_token)
-      
-      # Check if the secret engine is already enabled
-      try:
-         vault_client.sys.read_mount_configuration(path='kv')
-         logger.info('Secrets engine at path "kv" is already enabled.')
-      except hvac.exceptions.InvalidPath:
-         # Enable the secrets engine if it's not already enabled
-         vault_client.sys.enable_secrets_engine(backend_type='kv', path='kv')
+        vault_client = hvac.Client(url=vault_url, token=vault_token)
+        
+        # Check if the secret engine is already enabled
+        try:
+            vault_client.sys.read_mount_configuration(path='kv')
+            logger.info('Secrets engine at path "kv" is already enabled.')
+        except hvac.exceptions.InvalidPath:
+            # Enable the secrets engine if it's not already enabled
+            vault_client.sys.enable_secrets_engine(backend_type='kv', path='kv')
 
-   try:
-      secret_metadata = vault_client.secrets.kv.v2.read_secret_metadata(path=path, mount_point=vault_mount)
-      kv_token_json = vault_client.secrets.kv.v2.read_secret_version(path=path, mount_point=vault_mount, raise_on_deleted_version=False)
-      kv_access_token_issued = kv_token_json['data']['data']['access_token_issued']
+    try:
+        secret_metadata = vault_client.secrets.kv.v2.read_secret_metadata(path=path, mount_point=vault_mount)
+        kv_token_json = vault_client.secrets.kv.v2.read_secret_version(path=path, mount_point=vault_mount, raise_on_deleted_version=False)
+        kv_access_token_issued = kv_token_json['data']['data']['access_token_issued']
 
-      # Get the absolute path to the parent directory
-      parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        # Convert kv_access_token_issued to a datetime object
+        kv_access_token_issued = datetime.fromisoformat(kv_access_token_issued)
 
-      # Construct the absolute path to the tokens.json file
-      tokens_file_path = os.path.join(parent_dir, 'tokens.json')
 
-      # Check if the tokens.json file exists
-      if os.path.exists(tokens_file_path):
-         with open(tokens_file_path, 'r') as f:
-               tokens = json.load(f)
-         file_access_token_issued = tokens['access_token_issued']
+        # Construct the absolute path to the tokens.json file
+        tokens_file_path = os.path.join(".", 'tokens.json')
 
-      if kv_access_token_issued and file_access_token_issued:
-         # Compare the created time of the tokens.json file and the secret in vault
-         if kv_access_token_issued > file_access_token_issued:
-               # The secret in vault is newer
-               logger.info('The secret in vault is newer than the tokens.json file. Updating the tokens.json file')
-               secret = vault_client.secrets.kv.v2.read_secret_version(path=path, mount_point='kv')
-               # Update the tokens.json file
-               with open(tokens_file_path, 'w') as f:
-                  json.dump(secret['data']['data'], f)
-   except hvac.exceptions.InvalidPath:
-      logger.error(f'Secret metadata for path "{path}" not found in Vault at mount point "{vault_mount}".')
+        # Check if the tokens.json file exists
+        if os.path.exists(tokens_file_path):
+            with open(tokens_file_path, 'r') as f:
+                tokens = json.load(f)
+            file_access_token_issued = tokens['access_token_issued']
 
-   client = schwabdev.Client(os.getenv('appKey'), os.getenv('appSecret'))
-   client.update_tokens_auto()
+            # Convert file_access_token_issued to a datetime object
+            file_access_token_issued = datetime.fromisoformat(file_access_token_issued)
 
-   if vault_url is not None:
-      # Update the vault with the new tokens
-      with open(tokens_file_path, 'r') as f:
-         tokens = json.load(f)
-      logger.info('Updating the vault with the new tokens')
-      vault_client.secrets.kv.v2.create_or_update_secret(path=path, secret=tokens, mount_point='kv')
+            if kv_access_token_issued and file_access_token_issued:
+                # Compare the created time of the tokens.json file and the secret in vault
+                if kv_access_token_issued > file_access_token_issued:
+                    # The secret in vault is newer
+                    logger.info('The secret in vault is newer than the tokens.json file. Updating the tokens.json file')
+                    secret = vault_client.secrets.kv.v2.read_secret_version(path=path, mount_point='kv')
+                    # Update the tokens.json file
+                    with open(tokens_file_path, 'w') as f:
+                        json.dump(secret['data']['data'], f)
+    except hvac.exceptions.InvalidPath:
+        logger.error(f'Secret metadata for path "{path}" not found in Vault at mount point "{vault_mount}".')
+    except Exception as e:
+        logger.error(f'An error occurred: {e}')
+        logger.error(traceback.format_exc())
 
-   return client
+    client = schwabdev.Client(os.getenv('appKey'), os.getenv('appSecret'))
+
+
+    if vault_url is not None:
+        # Update the vault with the new tokens
+        with open(tokens_file_path, 'r') as f:
+            tokens = json.load(f)
+        logger.info('Updating the vault with the new tokens')
+        vault_client.secrets.kv.v2.create_or_update_secret(path=path, secret=tokens, mount_point='kv')
+
+    return client
 
 
 if __name__ == '__main__':
