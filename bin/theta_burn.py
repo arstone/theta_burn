@@ -215,15 +215,15 @@ def get_security(symbol: str=None, cuspid: str=None, projection: str="symbol-sea
    elif cuspid is not None:
       resp = client.instrument_cusip(cuspid)
    else:
-      logger.error('Either symbol or cuspid must be provided.')
+      logger.error(f'Either symbol or cuspid must be provided. [Line {traceback.extract_stack()[-1].lineno}]')
       return None
 
    if resp.status_code == 404:
-      logger.error("Resource not found in call to get_security. Skipping')")
+      logger.error(f"Resource not found in call to get_security for {'symbol=' + symbol if symbol else 'cuspid=' + cuspid}. Skipping [Line {traceback.extract_stack()[-1].lineno}]")
       return None
 
    if resp.json() is None or 'instruments' not in resp.json():
-      logger.error(f'No instruments found for {symbol}. Skipping')
+      logger.error(f'No instruments found for {symbol or cuspid}. Skipping [Line {traceback.extract_stack()[-1].lineno}]')
       return None
    
    # Store the security
@@ -612,8 +612,8 @@ def load_equity(transaction: Transaction, transferItem: dict, assetType: str):
                                        amount = transferItem['price'],
                                        extended_amount = transferItem['cost'],
                                        quantity = abs(transferItem['amount']),
-                                       symbol = transferItem['instrument']['symbol'],
-                                       underlying = transferItem['instrument']['symbol'])
+                                       symbol = transferItem['instrument'].get('symbol'),
+                                       underlying = transferItem['instrument'].get('symbol'))
    session.add(transaction_item)
 
 

@@ -59,6 +59,7 @@ class Strategy(BaseModel):
     name = Column(String(255), nullable=False)
     description = Column(String(255), nullable=False)
     author = Column(String(255), nullable=False)
+    link = Column(String(255), nullable=True)
     user = relationship("User")
 
 class Trade(BaseModel):

@@ -15,8 +15,8 @@ class Database:
         db_password = os.getenv('db_password')
         db_host = os.getenv('db_host')
 
-        # Use a supported collation
-        self.engine = create_engine(f'mysql+mysqlconnector://{db_user}:{db_password}@{db_host}/{db_name}?charset=utf8mb4&collation=utf8mb4_unicode_ci')
+        # Change from utf8mb4 to utf8 to avoid encoding issues
+        self.engine = create_engine(f'mysql+mysqlconnector://{db_user}:{db_password}@{db_host}/{db_name}?charset=utf8&collation=utf8_unicode_ci')
         self.session_factory = sessionmaker(bind=self.engine)
         self.Session = scoped_session(self.session_factory)
         self._singleton_session = None

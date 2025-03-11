@@ -1,14 +1,29 @@
-body {
-    font-size: 14px;
+/* Ensure the body takes up the full height of the viewport */
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
 }
 
-.table {
-    font-size: 12px;
+.container {
+    padding-top: 80px; /* Padding ensures no margin collapse */
 }
 
-.table th, .table td {
-    vertical-align: middle;
+/* Style for the table controls */
+.table-controls {
     margin-bottom: 20px;
+}
+
+/* Style for the account dropdown */
+#account-id-dropdown {
+    margin-bottom: 0px;
+}
+
+/* Fix vertical alignment of Account label in navbar */
+.navbar form.d-flex .form-label {
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
 }
 
 .loading-spinner {
@@ -42,7 +57,7 @@ body {
     background-color: #f8d7da;
 }
 
-.dataTables_wrapper .dataTables_filter {
+.dataTables_filter {
     float: right;
     /* Remove text-align: right; or set it to left if you prefer */
     text-align: left; 
@@ -68,4 +83,26 @@ body {
 /* Ensure the DataTable itself is left-aligned */
 .dataTables_wrapper .dataTables_scroll {
     text-align: left;
+}
+
+/* Ensure the navbar is fixed at the top */
+.navbar {
+    z-index: 1000;
+    background-color: black; /* Set the navbar background to black */
+    top: 1em;
+}
+
+.content-container {
+    padding-top: 50px; /* Adjust the value as needed */
+}
+
+.navbar-custom {
+    border-radius: 15px;
+    margin: 10px auto;
+    width: 50%; /* Adjust the width as needed */
+    max-width: 1200px; /* Optional: set a maximum width */
+}
+
+table.dataTable td {
+    font-size: 14px;
 }

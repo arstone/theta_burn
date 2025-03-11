@@ -47,20 +47,21 @@ create table strategies (
     name VARCHAR(255) NOT NULL,
     description VARCHAR(255) NOT NULL,
     author VARCHAR(255) NOT NULL,
+    link VARCHAR(255),
+    UNIQUE (user_id, name),
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
-create table trades (
-    trade_id bigint AUTO_INCREMENT PRIMARY KEY,
-    user_trade_id INT NOT NULL default 0,
-    strategy_id INT NOT NULL,
-    user_id INT NOT NULL,
-    account_id INT NOT NULL,
-    open_date DATE NOT NULL,
-    close_date DATE NOT NULL,
-    type VARCHAR(255) NOT NULL,
-    status VARCHAR(255) NOT NULL,
-    amount DECIMAL(10,2) NOT NULL,
+    create table trades (
+        trade_id bigint AUTO_INCREMENT PRIMARY KEY,
+        user_trade_id INT NOT NULL default 0,
+        strategy_id INT NOT NULL,
+        user_id INT NOT NULL,
+        account_id INT NOT NULL,
+        open_date DATE NOT NULL,
+        close_date DATE NOT NULL,
+        type VARCHAR(255) NOT NULL,
+        status VARCHAR(255) NOT NULL,   amount DECIMAL(10,2) NOT NULL,
     profit_target DECIMAL(10,2) NOT NULL,
     stop_loss_target DECIMAL(10,2) NOT NULL,
     starting_margin DECIMAL(10,2) NOT NULL,
@@ -229,6 +230,7 @@ select
    t.position_id,
    t.trade_id,
    t.order_id,
+   o.close_time order_date,
    ifnull(ti.description,t.description) description,
    ti.quantity,
    ifnull(ti.symbol,'') symbol,
@@ -245,6 +247,7 @@ from
    accounts a
    join transactions t using (account_id)
    join transaction_items ti using (transaction_id)
+   left join orders o using (order_id)
    join (select
             transaction_id, 
             sum(quantity) quantity,
@@ -259,4 +262,3 @@ where
 );
 
 CREATE INDEX idx_account_symbol_latest ON positions (account_id, symbol, latest);
-

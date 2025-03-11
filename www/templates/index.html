@@ -1,367 +1,385 @@
 <!DOCTYPE html>
 <html lang="en" class="dark" data-bs-theme="dark" data-theme="dark">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Trades and Transactions</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
-    <link rel="stylesheet" href="https://cdn.datatables.net/2.2.1/css/dataTables.dataTables.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="https://cdn.datatables.net/2.2.1/css/dataTables.dataTables.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.datatables.net/2.2.1/js/dataTables.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-
-        function formatDate() {
-            return function(data, type, row) {
-                return new Date(data).toLocaleString('en-GB', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: false
-                }).replace(',', '');
-            };
-        }
-        
-        function formatNumber() {
-            return function(data, type, row) {
-                if (typeof data === 'string' && data.includes('E')) {
-                    return parseFloat(data).toFixed(8).replace(/\.?0+$/, '');
-                }
-                return data;
-            };
-        }
-        function formatCurrency() {
-            return function(data, type, row) {
-                if (typeof data === 'string' && data.includes('E')) {
-                    data = parseFloat(data);
-                }
-                return new Intl.NumberFormat('en-US', {
-                    style: 'currency',
-                    currency: 'USD'
-                }).format(data);
-            };
-        }
-        $(document).ready(function() {
-            // Initialize Trades DataTable
-            $('#trades-table').DataTable({
-                "processing": true,
-                "serverSide": true,
-                "ajax": {
-                    "url": "/api/trades",
-                    "type": "GET"
-                },
-                "columns": [
-                    { "data": "trade_id" },
-                    { "data": "user_id" },
-                    { "data": "account_id" },
-                    { "data": "open_date", "render": formatDate() },
-                    { "data": "close_date", "render": formatDate() },
-                    { "data": "type" },
-                    { "data": "status" },
-                    { "data": "amount", "render": formatCurrency() },
-                    { "data": "profit_target", "render": formatCurrency() },
-                    { "data": "stop_loss_target", "render": formatCurrency() },
-                    { "data": "starting_margin", "render": formatCurrency() },
-                    { "data": "ending_margin", "render": formatCurrency() },
-                    { "data": "max_margin", "render": formatCurrency() },
-                    { "data": "adjustments" },
-                    { "data": "comment" },
-                    { "data": "description" },
-                    { "data": null, "defaultContent": '<button class="btn btn-primary assign-btn">Assign</button>' }
-                ]
+      $(document).ready(function () {
+        // Fetch account IDs and populate the dropdown
+        $.ajax({
+          url: "/api/accounts",
+          type: "GET",
+          success: function (data) {
+            var dropdown = $("#account-id-dropdown");
+            data.forEach(function (account) {
+              dropdown.append('<option value="' + account.account_id + '">' + account.name + "</option>");
             });
-        
-            // Initialize Unassigned Transactions DataTable
-            $('#unassigned-transactions-table').DataTable({
-                "processing": true,
-                "serverSide": true,
-                "ajax": {
-                    "url": "/api/unassigned_transactions",
-                    "type": "GET",
-                    "dataSrc": function(json) {
-                        // Ensure totalExtendedAmount is a number
-                        var totalExtendedAmount = parseFloat(json.totalExtendedAmount) || 0;
-                        // Update the total extended amount
-                        $('#total-extended-amount').html('Total Extended Amount: $' + totalExtendedAmount.toFixed(2));
-                        return json.data;
-                    }
-                },
-                "columns": [
-                    { "data": "select", "orderable": false, "className": "select-checkbox" },
-                    { "data": "transaction_id" },
-                    { "data": "account_id" },
-                    { "data": "date", "render": formatDate() },
-                    { "data": "month" },
-                    { "data": "year" },
-                    { "data": "position_id" },
-                    { "data": "order_id" },
-                    { "data": "description" },
-                    { "data": "quantity" },
-                    { "data": "symbol" },
-                    { "data": "underlying" },
-                    { "data": "amount", "render": formatCurrency() },
-                    { "data": "commission", "render": formatCurrency() },
-                    { "data": "fees", "render": formatCurrency() },
-                    { "data": "transaction" },
-                    { "data": "asset_type" },
-                    { "data": "expiration_date", "render": formatDate() },
-                    { "data": "strike_price", "render": formatCurrency() },
-                    { "data": "extended_amount", "render": formatCurrency() }
-                ],
-                "select": {
-                    "style": "multi",
-                    "selector": "td:first-child input[type='checkbox']"
-                },
-                "order": [[1, 'asc']]
-            });               
-
-           
-            // Handle Assign button click
-            $('#trades-table tbody').on('click', '.assign-btn', function() {
-                var data = $('#trades-table').DataTable().row($(this).parents('tr')).data();
-                assignTransactions(data.trade_id);
-            });
-
-           // Fetch accounts for the dropdown
-           $.getJSON('/api/accounts', function(accounts) {
-                var accountSelect = $('#account_id');
-                accounts.forEach(function(account) {
-                    accountSelect.append(new Option(account.name, account.account_id));
-                });
-            }).fail(function(jqxhr, textStatus, error) {
-                console.error("Request Failed: " + textStatus + ", " + error); // Debugging line
-            });
-            
-            // Handle Add Trade form submission
-            $('#addTradeForm').on('submit', function(event) {
-                event.preventDefault();
-                var formData = $(this).serialize();
-                $.post('/api/add_trade', formData, function(response) {
-                    $('#addTradeModal').modal('hide');
-                    $('#trades-table').DataTable().ajax.reload();
-                });
-            });
+          },
         });
 
-        async function assignTransactions(tradeId) {
-            const checkboxes = document.querySelectorAll('#unassigned-transactions-table input[type="checkbox"]:checked');
-            const transactionIds = Array.from(checkboxes).map(checkbox => checkbox.value);
-            try {
-                const response = await fetch(`/api/assign_transactions/${tradeId}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ transaction_ids: transactionIds })
-                });
-                if (!response.ok) {
-                    throw new Error(`Network response was not ok: ${response.statusText}`);
-                }
-                $('#unassigned-transactions-table').DataTable().ajax.reload();
-            } catch (error) {
-                showErrorModal(error.message);
-            }
-        }
-        
-        function showErrorModal(message) {
-            const errorModal = document.getElementById('errorModal');
-            const errorMessage = document.getElementById('errorMessage');
-            errorMessage.textContent = message;
-            $(errorModal).modal('show');
-        }
-    </script>
-</head>
-<body>
-    <div class="container-fluid"
-        <h1 class="mt-5">Trades</h1>
-        <button class="btn btn-primary mb-3" data-bs-toggle="modal" data-bs-target="#addTradeModal">Add Trade</button>
-        <table id="trades-table" class="display" style="width:100%">
-            <thead>
-                <tr>
-                    <th>Trade ID</th>
-                    <th>User ID</th>
-                    <th>Account ID</th>
-                    <th>Open Date</th>
-                    <th>Close Date</th>
-                    <th>Type</th>
-                    <th>Status</th>
-                    <th>Amount</th>
-                    <th>Profit Target</th>
-                    <th>Stop Loss Target</th>
-                    <th>Starting Margin</th>
-                    <th>Ending Margin</th>
-                    <th>Max Margin</th>
-                    <th>Adjustments</th>
-                    <th>Comment</th>
-                    <th>Description</th>
-                    <th>Assign Transactions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for trade in trades %}
-                <tr>
-                    <td>{{ trade.trade_id }}</td>
-                    <td>{{ trade.user_id }}</td>
-                    <td>{{ trade.account_id }}</td>
-                    <td>{{ trade.open_date }}</td>
-                    <td>{{ trade.close_date }}</td>
-                    <td>{{ trade.type }}</td>
-                    <td>{{ trade.status }}</td>
-                    <td>{{ trade.amount }}</td>
-                    <td>{{ trade.profit_target }}</td>
-                    <td>{{ trade.stop_loss_target }}</td>
-                    <td>{{ trade.starting_margin }}</td>
-                    <td>{{ trade.ending_margin }}</td>
-                    <td>{{ trade.max_margin }}</td>
-                    <td>{{ trade.adjustments }}</td>
-                    <td>{{ trade.comment }}</td>
-                    <td>{{ trade.description }}</td>
-                    <td><button class="btn btn-primary" onclick="assignTransactions({{ trade.trade_id }})">Assign</button></td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        // Initialize Unassigned Transactions DataTable
+        var table = $("#unassigned-transactions-table").DataTable({
+          processing: true,
+          serverSide: true,
+          ajax: {
+            url: "/api/unassigned_transactions",
+            type: "GET",
+            data: function (d) {
+              d.account_id = $("#account-id-dropdown").val();
+            },
+            dataSrc: function (json) {
+              // Ensure totalExtendedAmount is a number
+              var totalExtendedAmount = parseFloat(json.totalExtendedAmount) || 0;
+              // Update the total extended amount
+              $("#total-extended-amount").html("Total Extended Amount: $" + totalExtendedAmount.toFixed(2));
+              return json.data;
+            },
+          },
+          columns: [
+            { data: "select", orderable: false, className: "select-checkbox" },
+            { data: "transaction_id" },
+            { data: "date", render: formatDate() },
+            { data: "order_id" },
+            { data: "description" },
+            { data: "quantity", render: formatInteger() },
+            { data: "symbol" },
+            { data: "underlying" },
+            { data: "commission", render: formatCurrency() },
+            { data: "fees", render: formatCurrency() },
+            { data: "transaction" },
+            { data: "asset_type" },
+            { data: "expiration_date", render: formatDate() },
+            { data: "strike_price", render: formatCurrency() },
+            { data: "extended_amount", render: formatCurrency() },
+          ],
+          select: {
+            style: "multi",
+            selector: "td:first-child input[type='checkbox']",
+          },
+          order: [[1, "dsc"]],
+        });
 
-        <h2 class="mt-5">Unassigned Transactions</h2>
-        <div id="loading-spinner" class="loading-spinner">
-            <div class="spinner-border" role="status">
-                <span class="sr-only">Loading...</span>
-            </div>
+        // Filter table when account ID is changed
+        $("#account-id-dropdown").on("change", function () {
+          table.ajax.reload();
+        });
+
+        // Handle Assign Transactions button click
+        $("#open-trades-table").on("click", ".assign-transactions-btn", function () {
+          var tradeId = $(this).data("trade-id");
+          var selectedTransactions = unassignedTable.rows(".selected").data().toArray();
+          var transactionIds = selectedTransactions.map(function (transaction) {
+            return transaction.transaction_id;
+          });
+
+          if (transactionIds.length === 0) {
+            alert("Please select at least one transaction to assign.");
+            return;
+          }
+
+          $.ajax({
+            url: "/api/assign_transactions/" + tradeId,
+            type: "POST",
+            contentType: "application/json",
+            data: JSON.stringify({ transaction_ids: transactionIds }),
+            success: function () {
+              unassignedTable.ajax.reload();
+              openTradesTable.ajax.reload();
+              alert("Transactions assigned successfully.");
+            },
+            error: function () {
+              alert("Failed to assign transactions.");
+            },
+          });
+        });
+
+        function formatDate() {
+          return function (data, type, row) {
+            if (!data) {
+              return "";
+            }
+            // Create a new Date object and extract the date part using toISOString
+            const date = new Date(data);
+            return date.toISOString().split("T")[0];
+          };
+        }
+
+        function formatInteger() {
+          return function (data, type, row) {
+            if (data === null || data === undefined || data === "") {
+              return "";
+            }
+            return parseInt(data, 10);
+          };
+        }
+
+        function formatCurrency() {
+          return function (data, type, row) {
+            if (data === null || data === undefined || data === "") {
+              return "";
+            }
+            return "$" + parseFloat(data).toFixed(2);
+          };
+        }
+      });
+    </script>
+  </head>
+  <body>
+    {% set active_page = 'home' %} {% include 'navbar.html' %}
+
+    <div class="container-fluid content-container mt-4">
+      <h1>Unassigned Transactions</h1>
+
+      <div id="loading-spinner" class="loading-spinner">
+        <div class="spinner-border" role="status">
+          <span class="sr-only">Loading...</span>
         </div>
-        <div class="table-controls">
-            <div id="total-extended-amount" style="margin-right: 20px; display: inline-block;">
-                Total Extended Amount: $0.00
-            </div>
+      </div>
+      <div class="table-controls">
+        <div id="total-extended-amount" style="margin-right: 20px; display: inline-block">
+          Total Extended Amount: $0.00
         </div>
-        <table id="unassigned-transactions-table" class="display" style="width:100%">
-            <thead>
-                <tr>
-                    <th>Select</th>
-                    <th>Transaction ID</th>
-                    <th>Account ID</th>
-                    <th>Date</th>
-                    <th>Month</th>
-                    <th>Year</th>
-                    <th>Position ID</th>
-                    <th>Order ID</th>
-                    <th>Description</th>
-                    <th>Quantity</th>
-                    <th>Symbol</th>
-                    <th>Underlying</th>
-                    <th>Amount</th>
-                    <th>Commission</th>
-                    <th>Fees</th>
-                    <th>Transaction</th>
-                    <th>Asset Type</th>
-                    <th>Expiration Date</th>
-                    <th>Strike Price</th>
-                    <th>Extended Amount</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- Unassigned transactions will be loaded here by DataTables -->
-            </tbody>
-        </table>
+      </div>
+      <table id="unassigned-transactions-table" class="display" style="width: 100%">
+        <thead>
+          <tr>
+            <th>Select</th>
+            <th>Transaction ID</th>
+            <th>Date</th>
+            <th>Order ID</th>
+            <th>Description</th>
+            <th>Quantity</th>
+            <th>Symbol</th>
+            <th>Underlying</th>
+            <th>Commission</th>
+            <th>Fees</th>
+            <th>Transaction</th>
+            <th>Asset Type</th>
+            <th>Expiration Date</th>
+            <th>Strike Price</th>
+            <th>Extended Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Unassigned transactions will be loaded here by DataTables -->
+        </tbody>
+      </table>
     </div>
 
     <!-- Add Trade Modal -->
     <div class="modal fade" id="addTradeModal" tabindex="-1" aria-labelledby="addTradeModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="addTradeModalLabel">Add Trade</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="addTradeForm">
-                        <input type="hidden" name="user_id" value="1">
-                        <div class="mb-3">
-                            <label for="account_id" class="form-label">Account ID</label>
-                            <select class="form-select" id="account_id" name="account_id" required></select>
-                        </div>
-                        <div class="mb-3">
-                            <label for="open_date" class="form-label">Open Date</label>
-                            <input type="date" class="form-control" id="open_date" name="open_date" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="close_date" class="form-label">Close Date</label>
-                            <input type="date" class="form-control" id="close_date" name="close_date" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="description" class="form-label">Description</label>
-                            <input type="text" class="form-control" id="description" name="description" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="type" class="form-label">Type</label>
-                            <input type="text" class="form-control" id="type" name="type" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="status" class="form-label">Status</label>
-                            <select class="form-select" id="status" name="status" required>
-                                <option value="Open">Open</option>
-                                <option value="Closed">Closed</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label for="amount" class="form-label">Amount</label>
-                            <input type="number" class="form-control" id="amount" name="amount" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="profit_target" class="form-label">Profit Target</label>
-                            <input type="number" class="form-control" id="profit_target" name="profit_target" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="stop_loss_target" class="form-label">Stop Loss Target</label>
-                            <input type="number" class="form-control" id="stop_loss_target" name="stop_loss_target" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="starting_margin" class="form-label">Starting Margin</label>
-                            <input type="number" class="form-control" id="starting_margin" name="starting_margin" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="ending_margin" class="form-label">Ending Margin</label>
-                            <input type="number" class="form-control" id="ending_margin" name="ending_margin" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="max_margin" class="form-label">Max Margin</label>
-                            <input type="number" class="form-control" id="max_margin" name="max_margin" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="adjustments" class="form-label">Adjustments</label>
-                            <input type="text" class="form-control" id="adjustments" name="adjustments">
-                        </div>
-                        <div class="mb-3">
-                            <label for="comment" class="form-label">Comment</label>
-                            <input type="text" class="form-control" id="comment" name="comment">
-                        </div>
-                        <button type="submit" class="btn btn-primary">Add Trade</button>
-                    </form>
-                </div>
-            </div>
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="addTradeModalLabel">Add Trade</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <form id="addTradeForm">
+              <input type="hidden" name="user_id" value="1" />
+              <div class="mb-3">
+                <label for="account_id" class="form-label">Account ID</label>
+                <select class="form-select" id="account_id" name="account_id" required></select>
+              </div>
+              <div class="mb-3">
+                <label for="open_date" class="form-label">Open Date</label>
+                <input type="date" class="form-control" id="open_date" name="open_date" required />
+              </div>
+              <div class="mb-3">
+                <label for="close_date" class="form-label">Close Date</label>
+                <input type="date" class="form-control" id="close_date" name="close_date" required />
+              </div>
+              <div class="mb-3">
+                <label for="description" class="form-label">Description</label>
+                <input type="text" class="form-control" id="description" name="description" required />
+              </div>
+              <div class="mb-3">
+                <label for="type" class="form-label">Type</label>
+                <input type="text" class="form-control" id="type" name="type" required />
+              </div>
+              <div class="mb-3">
+                <label for="status" class="form-label">Status</label>
+                <select class="form-select" id="status" name="status" required>
+                  <option value="Open">Open</option>
+                  <option value="Closed">Closed</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="profit_target" class="form-label">Profit Target</label>
+                <input type="number" class="form-control" id="profit_target" name="profit_target" required />
+              </div>
+              <div class="mb-3">
+                <label for="stop_loss_target" class="form-label">Stop Loss Target</label>
+                <input type="number" class="form-control" id="stop_loss_target" name="stop_loss_target" required />
+              </div>
+              <div class="mb-3">
+                <label for="starting_margin" class="form-label">Starting Margin</label>
+                <input type="number" class="form-control" id="starting_margin" name="starting_margin" required />
+              </div>
+              <div class="mb-3">
+                <label for="ending_margin" class="form-label">Ending Margin</label>
+                <input type="number" class="form-control" id="ending_margin" name="ending_margin" required />
+              </div>
+              <div class="mb-3">
+                <label for="max_margin" class="form-label">Max Margin</label>
+                <input type="number" class="form-control" id="max_margin" name="max_margin" required />
+              </div>
+              <div class="mb-3">
+                <label for="adjustments" class="form-label">Adjustments</label>
+                <input type="text" class="form-control" id="adjustments" name="adjustments" />
+              </div>
+              <div class="mb-3">
+                <label for="comment" class="form-label">Comment</label>
+                <input type="text" class="form-control" id="comment" name="comment" />
+              </div>
+              <button type="submit" class="btn btn-primary">Add Trade</button>
+            </form>
+          </div>
         </div>
+      </div>
     </div>
 
     <!-- Error Modal -->
-    <div class="modal fade" id="errorModal" tabindex="-1" role="dialog" aria-labelledby="errorModalLabel" aria-hidden="true">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <div class="modal-header error">
-                    <h5 class="modal-title" id="errorModalLabel">Error</h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
-                </div>
-                <div class="modal-body error">
-                    <p id="errorMessage"></p>
-                </div>
-                <div class="modal-footer error">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-                </div>
-            </div>
+    <div
+      class="modal fade"
+      id="errorModal"
+      tabindex="-1"
+      role="dialog"
+      aria-labelledby="errorModalLabel"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header error">
+            <h5 class="modal-title" id="errorModalLabel">Error</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body error">
+            <p id="errorMessage"></p>
+          </div>
+          <div class="modal-footer error">
+            <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+          </div>
         </div>
+      </div>
     </div>
-</body>
+
+    <!-- Add Trade Modal -->
+    <div class="modal fade" id="addTradeModal" tabindex="-1" aria-labelledby="addTradeModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="addTradeModalLabel">Add Trade</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <form id="addTradeForm">
+              <input type="hidden" name="user_id" value="1" />
+              <div class="mb-3">
+                <label for="account_id" class="form-label">Account ID</label>
+                <select class="form-select" id="account_id" name="account_id" required></select>
+              </div>
+              <div class="mb-3">
+                <label for="open_date" class="form-label">Open Date</label>
+                <input type="date" class="form-control" id="open_date" name="open_date" required />
+              </div>
+              <div class="mb-3">
+                <label for="close_date" class="form-label">Close Date</label>
+                <input type="date" class="form-control" id="close_date" name="close_date" required />
+              </div>
+              <div class="mb-3">
+                <label for="description" class="form-label">Description</label>
+                <input type="text" class="form-control" id="description" name="description" required />
+              </div>
+              <div class="mb-3">
+                <label for="type" class="form-label">Type</label>
+                <input type="text" class="form-control" id="type" name="type" required />
+              </div>
+              <div class="mb-3">
+                <label for="status" class="form-label">Status</label>
+                <select class="form-select" id="status" name="status" required>
+                  <option value="Open">Open</option>
+                  <option value="Closed">Closed</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="amount" class="form-label">Amount</label>
+                <input type="number" class="form-control" id="amount" name="amount" required />
+              </div>
+              <div class="mb-3">
+                <label for="profit_target" class="form-label">Profit Target</label>
+                <input type="number" class="form-control" id="profit_target" name="profit_target" required />
+              </div>
+              <div class="mb-3">
+                <label for="stop_loss_target" class="form-label">Stop Loss Target</label>
+                <input type="number" class="form-control" id="stop_loss_target" name="stop_loss_target" required />
+              </div>
+              <div class="mb-3">
+                <label for="starting_margin" class="form-label">Starting Margin</label>
+                <input type="number" class="form-control" id="starting_margin" name="starting_margin" required />
+              </div>
+              <div class="mb-3">
+                <label for="ending_margin" class="form-label">Ending Margin</label>
+                <input type="number" class="form-control" id="ending_margin" name="ending_margin" required />
+              </div>
+              <div class="mb-3">
+                <label for="max_margin" class="form-label">Max Margin</label>
+                <input type="number" class="form-control" id="max_margin" name="max_margin" required />
+              </div>
+              <div class="mb-3">
+                <label for="adjustments" class="form-label">Adjustments</label>
+                <input type="text" class="form-control" id="adjustments" name="adjustments" />
+              </div>
+              <div class="mb-3">
+                <label for="comment" class="form-label">Comment</label>
+                <input type="text" class="form-control" id="comment" name="comment" />
+              </div>
+              <button type="submit" class="btn btn-primary">Add Trade</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div
+      class="modal fade"
+      id="errorModal"
+      tabindex="-1"
+      role="dialog"
+      aria-labelledby="errorModalLabel"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header error">
+            <h5 class="modal-title" id="errorModalLabel">Error</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body error">
+            <p id="errorMessage"></p>
+          </div>
+          <div class="modal-footer error">
+            <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
 </html>
